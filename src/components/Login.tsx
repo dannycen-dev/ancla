@@ -19,7 +19,17 @@ export function Login({ onSuccess }: Props) {
       const res = await apiLogin(username.trim(), password)
       onSuccess(res.username)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo iniciar sesion')
+      const msg = err instanceof Error ? err.message : 'No se pudo iniciar sesion'
+      if (
+        msg.includes('Failed to fetch') ||
+        msg.includes('NetworkError') ||
+        msg.includes('Load failed') ||
+        msg.includes('fetch')
+      ) {
+        setError('La API no esta corriendo. Usa: npm run dev (api+web) o npm run dev:api')
+      } else {
+        setError(msg)
+      }
     } finally {
       setLoading(false)
     }
@@ -37,18 +47,20 @@ export function Login({ onSuccess }: Props) {
         </p>
 
         <form className="panel" onSubmit={submit}>
-          <label className="field">
+          <label className="field" htmlFor="ancla-user">
             <span className="eyebrow">Usuario</span>
             <input
+              id="ancla-user"
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
             />
           </label>
-          <label className="field">
+          <label className="field" htmlFor="ancla-pass">
             <span className="eyebrow">Contrasena</span>
             <input
+              id="ancla-pass"
               type="password"
               autoComplete="current-password"
               value={password}

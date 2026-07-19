@@ -22,4 +22,9 @@ data/*.sqlite
 # Logs
 *.log
 npm-debug.log*
+
+# Test artifacts
+test-results/
+playwright-report/
+data/test-*.png
 data/.env.password.txt

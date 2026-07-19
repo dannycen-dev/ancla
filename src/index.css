@@ -304,7 +304,7 @@ a {
   transform: translateX(-50%);
   width: min(492px, calc(100% - 24px));
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 4px;
   padding: 8px;
   border-radius: 20px;
@@ -322,9 +322,10 @@ a {
   padding: 8px 4px;
   border-radius: 14px;
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
+  padding: 8px 2px;
 }
 
 .nav button.active {
@@ -749,4 +750,56 @@ a {
   font-size: 0.8rem;
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--line);
+}
+
+.budget-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.budget-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #8fd14f);
+}
+.price-tag {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.swap-line {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #9fd4a0;
+}
+
+.pantry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.pantry-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pantry-grid input {
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 1rem;
+  font-weight: 600;
 }

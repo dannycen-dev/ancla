@@ -13,13 +13,25 @@ import {
   pickDefaultMeal,
 } from './lib/planRuntime'
 import type { Exercise, MealOption, MealSlot, Plan } from './types'
+import {
+  BUDGET_MXN,
+  DAYS,
+  DEFAULT_PANTRY,
+  MAGIC_RULES,
+  build15DayBudgetCart,
+  cartTotals,
+  explain15DayNeeds,
+  groupCartByStore,
+  type PantryStock,
+} from './lib/budgetCart'
 
-type Tab = 'hoy' | 'dieta' | 'gym' | 'antojo' | 'progreso'
+type Tab = 'hoy' | 'dieta' | 'gym' | 'super' | 'antojo' | 'progreso'
 
 const NAV: { id: Tab; label: string; ico: string }[] = [
   { id: 'hoy', label: 'Hoy', ico: '◉' },
   { id: 'dieta', label: 'Plan', ico: '🍴' },
   { id: 'gym', label: 'Gym', ico: '⌂' },
+  { id: 'super', label: 'Super', ico: '🛒' },
   { id: 'antojo', label: 'Antojo', ico: '⚡' },
   { id: 'progreso', label: 'Racha', ico: '↑' },
 ]
@@ -48,6 +60,25 @@ export default function App() {
   const [showSwaps, setShowSwaps] = useState(false)
   const [openExercise, setOpenExercise] = useState<string | null>(null)
   const [bootError, setBootError] = useState('')
+  const [bought, setBought] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('ancla-cart-15d')
+      return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+    } catch {
+      return {}
+    }
+  })
+  const [includeOptional, setIncludeOptional] = useState(false)
+  const [pantry, setPantry] = useState<PantryStock>(() => {
+    try {
+      const raw = localStorage.getItem('ancla-pantry')
+      if (raw) return { ...DEFAULT_PANTRY, ...(JSON.parse(raw) as PantryStock) }
+    } catch {
+      // ignore
+    }
+    // Default actual del usuario (quincena)
+    return { polloKg: 2, atunPiezas: 3, resKg: 0 }
+  })
 
   const tracker = useTracker(plan)
 
@@ -100,6 +131,41 @@ export default function App() {
   const block = getBlockForWeek(week)
   const workout = useMemo(() => (plan ? getWorkoutForToday(plan) : null), [plan])
   const seed = Number(format(new Date(), 'd'))
+  const cartItems = useMemo(() => {
+    if (!plan) return []
+    const all = build15DayBudgetCart(plan, pantry)
+    return includeOptional ? all : all.filter((i) => i.essential)
+  }, [plan, includeOptional, pantry])
+  const cartGroups = useMemo(() => groupCartByStore(cartItems), [cartItems])
+  const totals = useMemo(() => cartTotals(cartItems), [cartItems])
+  const allCart = useMemo(() => (plan ? build15DayBudgetCart(plan, pantry) : []), [plan, pantry])
+  const allTotals = useMemo(() => cartTotals(allCart), [allCart])
+  const needs = useMemo(() => explain15DayNeeds(pantry), [pantry])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ancla-pantry', JSON.stringify(pantry))
+    } catch {
+      // ignore
+    }
+  }, [pantry])
+  const shopTotal = cartItems.length
+  const shopDone = cartItems.filter((i) => bought[i.id]).length
+  const spentMarked = cartItems
+    .filter((i) => bought[i.id])
+    .reduce((n, i) => n + i.price, 0)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ancla-cart-15d', JSON.stringify(bought))
+    } catch {
+      // ignore
+    }
+  }, [bought])
+
+  const toggleBought = (id: string) => {
+    setBought((prev) => ({ ...prev, [id]: !prev[id] }))
+  }
 
   const nextMealSlot = useMemo(() => {
     if (!plan) return null
@@ -591,6 +657,189 @@ export default function App() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {tab === 'super' && (
+        <div className="fade-in">
+          <p className="eyebrow">Despensa 15 dias</p>
+          <h2 className="section-title">Super</h2>
+          <p className="lede">
+            Carrito {DAYS} dias · meta ${BUDGET_MXN.toLocaleString('es-MX')} (pasarse un poco OK si
+            ahorras en lo que ya tienes). Ancla resta tu despensa. Anthropic viene despues.
+          </p>
+
+          <div className="panel" style={{ marginBottom: 12 }}>
+            <p className="eyebrow">Lo que ya tienes</p>
+            <div className="pantry-grid">
+              <label>
+                Pollo (kg)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={pantry.polloKg}
+                  onChange={(e) =>
+                    setPantry((p) => ({ ...p, polloKg: Number(e.target.value) || 0 }))
+                  }
+                />
+              </label>
+              <label>
+                Atun (pzas)
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={pantry.atunPiezas}
+                  onChange={(e) =>
+                    setPantry((p) => ({ ...p, atunPiezas: Number(e.target.value) || 0 }))
+                  }
+                />
+              </label>
+              <label>
+                Res (kg)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={pantry.resKg}
+                  onChange={(e) =>
+                    setPantry((p) => ({ ...p, resKg: Number(e.target.value) || 0 }))
+                  }
+                />
+              </label>
+            </div>
+            <p className="check-sub" style={{ marginTop: 8 }}>
+              Con {pantry.polloKg} kg pollo + {pantry.atunPiezas} atun: compra res/molida y casi no
+              mas pollo.
+            </p>
+          </div>
+
+          <div className="stat-grid" style={{ marginBottom: 14 }}>
+            <div className="stat">
+              <strong>${Math.round(totals.essentialTotal || totals.allTotal)}</strong>
+              <span>Esenciales</span>
+            </div>
+            <div className="stat">
+              <strong>${Math.round(BUDGET_MXN - (includeOptional ? totals.allTotal : allTotals.essentialTotal))}</strong>
+              <span>Quedan</span>
+            </div>
+            <div className="stat">
+              <strong>
+                {shopDone}/{shopTotal}
+              </strong>
+              <span>Listos</span>
+            </div>
+          </div>
+
+          <div className="panel" style={{ marginBottom: 12 }}>
+            <div className="panel-head">
+              <p className="eyebrow" style={{ margin: 0 }}>
+                Presupuesto
+              </p>
+              <span className={`chip ${totals.allTotal <= BUDGET_MXN || !includeOptional ? '' : 'warn'}`}>
+                ${Math.round(includeOptional ? totals.allTotal : allTotals.essentialTotal)} / ${BUDGET_MXN}
+              </span>
+            </div>
+            <div className="budget-bar" aria-hidden>
+              <span
+                style={{
+                  width: `${Math.min(100, ((includeOptional ? totals.allTotal : allTotals.essentialTotal) / BUDGET_MXN) * 100)}%`,
+                }}
+              />
+            </div>
+            <p className="check-sub" style={{ marginTop: 10 }}>
+              Sam&apos;s ~${Math.round(includeOptional ? totals.sams : allTotals.sams)} · Dunosusa ~$
+              {Math.round(includeOptional ? totals.dunosusa : allTotals.dunosusa)} · Walmart ~$
+              {Math.round(includeOptional ? totals.walmart : allTotals.walmart)}
+              {spentMarked > 0 ? ` · Marcado $${Math.round(spentMarked)}` : ''}
+            </p>
+            <p className="check-sub" style={{ marginTop: 6 }}>
+              Similares (aparte): proteina $314 + omega $194 + probioticos $51 = ~$
+              {Math.round(allTotals.supplementsTotal || 559)} — no sale de los $1,500 de comida
+            </p>
+            <button
+              type="button"
+              className={`chip ${includeOptional ? '' : 'muted'}`}
+              style={{ marginTop: 10 }}
+              onClick={() => setIncludeOptional((v) => !v)}
+            >
+              {includeOptional
+                ? 'Opcionales + Similares ON'
+                : 'Solo despensa esencial (~$1,500)'}
+            </button>
+          </div>
+
+          <div className="panel">
+            <p className="eyebrow">Por que estas cantidades</p>
+            {needs.map((n) => (
+              <div key={n.label} style={{ marginBottom: 10 }}>
+                <p className="check-title">
+                  {n.label}: {n.need}
+                </p>
+                <p className="check-sub">{n.why}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="panel">
+            <p className="eyebrow">Reglas de magia</p>
+            {MAGIC_RULES.map((rule) => (
+              <p className="check-sub" key={rule} style={{ marginBottom: 8 }}>
+                {rule}
+              </p>
+            ))}
+          </div>
+
+          {cartGroups.map((group) =>
+            group.items.length === 0 ? null : (
+              <div className="panel" key={group.store}>
+                <div className="panel-head">
+                  <p className="eyebrow" style={{ margin: 0 }}>
+                    {group.label}
+                  </p>
+                  <span className="chip muted">${Math.round(group.total)}</span>
+                </div>
+                {group.items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`check-row ${bought[item.id] || item.owned ? 'done' : ''}`}
+                    onClick={() => !item.owned && toggleBought(item.id)}
+                  >
+                    <span className="check-box">
+                      <CheckIcon on={!!bought[item.id]} />
+                    </span>
+                    <span style={{ flex: 1 }}>
+                      <p className="check-title">
+                        {item.name}
+                        {!item.essential ? (item.id === 'alpura-pack' ? ' (trampa)' : ' (opcional)') : ''}
+                      </p>
+                      <p className="check-sub">
+                        {item.qty}
+                        {item.note ? ` — ${item.note}` : ''}
+                      </p>
+                      {item.swap ? (
+                        <p className="swap-line">Si no cabe: {item.swap}</p>
+                      ) : null}
+                    </span>
+                    <span className="price-tag">
+                      {item.owned ? 'ok' : item.price <= 0 ? '—' : `$${Math.round(item.price)}`}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ),
+          )}
+
+          <button
+            className="btn btn-ghost"
+            type="button"
+            onClick={() => setBought({})}
+            style={{ marginTop: 4 }}
+          >
+            Reiniciar checklist
+          </button>
         </div>
       )}
 

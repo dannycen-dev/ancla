@@ -90,8 +90,8 @@ function seedFresh() {
       'First boot requires ANCLA_USERNAME and ANCLA_PASSWORD in .env (never commit .env)',
     )
   }
-  if (password.length < 12) {
-    throw new Error('ANCLA_PASSWORD must be at least 12 characters')
+  if (password.length < 8) {
+    throw new Error('ANCLA_PASSWORD must be at least 8 characters')
   }
 
   const seed = loadSeedFile()
