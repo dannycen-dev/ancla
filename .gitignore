@@ -1,0 +1,25 @@
+# Dependencies & build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secrets & private user data (NEVER commit)
+.env
+.env.*
+!.env.example
+data/seed.private.json
+data/*.db
+data/*.db-*
+data/ancla.db
+data/*.sqlite
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+.agent-browser/
+
+# Logs
+*.log
+npm-debug.log*
+data/.env.password.txt

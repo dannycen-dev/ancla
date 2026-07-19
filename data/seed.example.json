@@ -1,0 +1,474 @@
+{
+  "version": 1,
+  "profile": {
+    "displayName": "Demo",
+    "planName": "Plan Demo",
+    "goal": "Recomposicion corporal de ejemplo",
+    "goal2": "Adaptacion alimenticia progresiva",
+    "dailyBudget": 1900,
+    "waterLiters": 3.5,
+    "freeMealsPerWeek": 3,
+    "greenMealsMin": 2,
+    "supplements": [
+      "Suplemento A segun tu profesional",
+      "Suplemento B segun tu profesional"
+    ]
+  },
+  "slots": {
+    "order": [
+      "colacion1",
+      "desayuno",
+      "colacion2",
+      "almuerzo",
+      "colacion3",
+      "cena"
+    ],
+    "required": [
+      "colacion1",
+      "desayuno",
+      "almuerzo",
+      "colacion3",
+      "cena"
+    ],
+    "labels": {
+      "colacion1": "Colacion 1",
+      "desayuno": "Desayuno",
+      "colacion2": "Colacion 2",
+      "almuerzo": "Almuerzo",
+      "colacion3": "Colacion 3",
+      "cena": "Cena"
+    },
+    "calories": {
+      "colacion1": 250,
+      "desayuno": 350,
+      "colacion2": 0,
+      "almuerzo": 750,
+      "colacion3": 150,
+      "cena": 550
+    }
+  },
+  "meals": [
+    {
+      "id": "d-demo-1",
+      "slot": "desayuno",
+      "label": "Huevos + tortilla",
+      "items": [
+        "3 huevos",
+        "2 tortillas",
+        "Verduras"
+      ],
+      "calories": 350,
+      "green": true
+    },
+    {
+      "id": "a-demo-1",
+      "slot": "almuerzo",
+      "label": "Pollo + verduras",
+      "items": [
+        "150g pollo",
+        "Verduras"
+      ],
+      "calories": 750,
+      "green": true
+    },
+    {
+      "id": "c-demo-1",
+      "slot": "cena",
+      "label": "Ensalada + pollo",
+      "items": [
+        "90g pollo",
+        "Verduras"
+      ],
+      "calories": 550,
+      "green": true
+    },
+    {
+      "id": "c1-demo",
+      "slot": "colacion1",
+      "label": "Fruta",
+      "items": [
+        "1 pieza de fruta"
+      ],
+      "calories": 250
+    },
+    {
+      "id": "c3-demo",
+      "slot": "colacion3",
+      "label": "Batido",
+      "items": [
+        "1 scoop proteina",
+        "Agua"
+      ],
+      "calories": 150
+    },
+    {
+      "id": "c2-demo",
+      "slot": "colacion2",
+      "label": "Snack opcional",
+      "items": [
+        "Snack ligero"
+      ],
+      "calories": 0,
+      "optional": true
+    }
+  ],
+  "planRules": [
+    "Hidrátate segun tu plan.",
+    "No te saltes comidas principales.",
+    "Usa comidas libres con moderacion."
+  ],
+  "craving": {
+    "steps": [
+      {
+        "id": "pause",
+        "title": "Pausa 90 segundos",
+        "body": "Respira antes de decidir.",
+        "action": "Listo"
+      },
+      {
+        "id": "swap",
+        "title": "Elige un swap",
+        "body": "Prefiere una opcion del plan.",
+        "action": "Ver opciones"
+      }
+    ],
+    "swaps": [
+      {
+        "craving": "Dulce",
+        "swap": "Fruta del plan",
+        "calories": "del plan"
+      }
+    ],
+    "focusRules": [
+      "Una decision a la vez.",
+      "Si fallas una comida, no falles el dia."
+    ]
+  },
+  "exerciseMedia": {},
+  "workouts": {
+    "weekStructure": [
+      {
+        "day": 1,
+        "name": "Lunes",
+        "workoutId": "d1",
+        "cardio": true
+      },
+      {
+        "day": 2,
+        "name": "Martes",
+        "workoutId": "d2",
+        "cardio": false
+      },
+      {
+        "day": 3,
+        "name": "Miercoles",
+        "workoutId": "d3",
+        "cardio": true
+      },
+      {
+        "day": 4,
+        "name": "Jueves",
+        "workoutId": "rest",
+        "cardio": false
+      },
+      {
+        "day": 5,
+        "name": "Viernes",
+        "workoutId": "d1",
+        "cardio": false
+      },
+      {
+        "day": 6,
+        "name": "Sabado",
+        "workoutId": "abdomen",
+        "cardio": false
+      },
+      {
+        "day": 0,
+        "name": "Domingo",
+        "workoutId": "rest",
+        "cardio": false
+      }
+    ],
+    "abdomen": [
+      {
+        "id": "ab-1",
+        "name": "Plancha",
+        "reps": "4x30s"
+      }
+    ],
+    "cardio": [
+      {
+        "id": "cardio-1",
+        "name": "Cardio",
+        "reps": "20 min"
+      }
+    ],
+    "systems": [
+      {
+        "name": "Rest-pause",
+        "how": "Pausa corta y continua."
+      }
+    ],
+    "fuerzaWeek": [
+      {
+        "dow": 1,
+        "block": "fuerza",
+        "title": "Dia d1 · fuerza",
+        "focus": "Pecho",
+        "isRest": false,
+        "cardio": true,
+        "workoutId": "d1",
+        "exercises": [
+          {
+            "id": "d1-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "d1-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 2,
+        "block": "fuerza",
+        "title": "Dia d2 · fuerza",
+        "focus": "Pierna",
+        "isRest": false,
+        "cardio": false,
+        "workoutId": "d2",
+        "exercises": [
+          {
+            "id": "d2-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "d2-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 3,
+        "block": "fuerza",
+        "title": "Dia d3 · fuerza",
+        "focus": "Espalda",
+        "isRest": false,
+        "cardio": true,
+        "workoutId": "d3",
+        "exercises": [
+          {
+            "id": "d3-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "d3-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 4,
+        "block": "fuerza",
+        "title": "Descanso",
+        "focus": "Descanso",
+        "isRest": true,
+        "cardio": false,
+        "workoutId": "rest",
+        "exercises": []
+      },
+      {
+        "dow": 5,
+        "block": "fuerza",
+        "title": "Dia d1 · fuerza",
+        "focus": "Pecho",
+        "isRest": false,
+        "cardio": false,
+        "workoutId": "d1",
+        "exercises": [
+          {
+            "id": "d1-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "d1-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 6,
+        "block": "fuerza",
+        "title": "Dia abdomen · fuerza",
+        "focus": "Core",
+        "isRest": false,
+        "cardio": false,
+        "workoutId": "abdomen",
+        "exercises": [
+          {
+            "id": "abdomen-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "abdomen-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 0,
+        "block": "fuerza",
+        "title": "Descanso",
+        "focus": "Descanso",
+        "isRest": true,
+        "cardio": false,
+        "workoutId": "rest",
+        "exercises": []
+      }
+    ],
+    "hipertrofiaWeek": [
+      {
+        "dow": 1,
+        "block": "hipertrofia",
+        "title": "Dia d1 · hipertrofia",
+        "focus": "Pecho",
+        "isRest": false,
+        "cardio": true,
+        "workoutId": "d1",
+        "exercises": [
+          {
+            "id": "d1-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "d1-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 2,
+        "block": "hipertrofia",
+        "title": "Dia d2 · hipertrofia",
+        "focus": "Pierna",
+        "isRest": false,
+        "cardio": false,
+        "workoutId": "d2",
+        "exercises": [
+          {
+            "id": "d2-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "d2-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 3,
+        "block": "hipertrofia",
+        "title": "Dia d3 · hipertrofia",
+        "focus": "Espalda",
+        "isRest": false,
+        "cardio": true,
+        "workoutId": "d3",
+        "exercises": [
+          {
+            "id": "d3-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "d3-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 4,
+        "block": "hipertrofia",
+        "title": "Descanso",
+        "focus": "Descanso",
+        "isRest": true,
+        "cardio": false,
+        "workoutId": "rest",
+        "exercises": []
+      },
+      {
+        "dow": 5,
+        "block": "hipertrofia",
+        "title": "Dia d1 · hipertrofia",
+        "focus": "Pecho",
+        "isRest": false,
+        "cardio": false,
+        "workoutId": "d1",
+        "exercises": [
+          {
+            "id": "d1-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "d1-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 6,
+        "block": "hipertrofia",
+        "title": "Dia abdomen · hipertrofia",
+        "focus": "Core",
+        "isRest": false,
+        "cardio": false,
+        "workoutId": "abdomen",
+        "exercises": [
+          {
+            "id": "abdomen-1",
+            "name": "Ejercicio demo 1",
+            "reps": "3x10"
+          },
+          {
+            "id": "abdomen-2",
+            "name": "Ejercicio demo 2",
+            "reps": "3x12"
+          }
+        ]
+      },
+      {
+        "dow": 0,
+        "block": "hipertrofia",
+        "title": "Descanso",
+        "focus": "Descanso",
+        "isRest": true,
+        "cardio": false,
+        "workoutId": "rest",
+        "exercises": []
+      }
+    ]
+  },
+  "copy": {
+    "onboardingLede": "Tu coach personal de dieta y gym. Una casilla a la vez.",
+    "progressNote": "La consistencia gana a la intensidad.",
+    "brandEyebrow": "Ancla",
+    "heroHint": "Marca la siguiente comida y sigue."
+  }
+}
