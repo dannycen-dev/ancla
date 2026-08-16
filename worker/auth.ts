@@ -35,15 +35,13 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-export function passwordsMatch(given: string, expected: string): boolean {
+export async function passwordsMatch(given: string, expected: string): Promise<boolean> {
   const encoder = new TextEncoder();
-  const left = encoder.encode(given);
-  const right = encoder.encode(expected);
-  if (left.byteLength !== right.byteLength) {
-    timingSafeEqual(left, left);
-    return false;
-  }
-  return timingSafeEqual(left, right);
+  const [left, right] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(given)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+  ]);
+  return crypto.subtle.timingSafeEqual(left, right);
 }
 
 const PBKDF2_ITERS = 100_000;
@@ -87,13 +85,22 @@ export async function verifyHashedPassword(password: string, stored: string): Pr
 
 function cookieFlags(requestUrl: string, maxAge: number): string {
   const secure = new URL(requestUrl).protocol === "https:" ? "; Secure" : "";
-  return `Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+  const expires = maxAge === 0 ? "; Expires=Thu, 01 Jan 1970 00:00:00 GMT" : "";
+  return `Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${expires}${secure}`;
 }
 
-export async function createSessionCookie(secret: string, requestUrl: string): Promise<string> {
+const REFRESH_WITHIN_SECONDS = 60 * 60 * 24 * 2;
+
+export type ParsedSession = { exp: number; generation: number };
+
+export async function createSessionCookie(
+  secret: string,
+  requestUrl: string,
+  generation = 0,
+): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + MAX_AGE_SECONDS;
   const nonce = crypto.randomUUID();
-  const payload = `${exp}.${nonce}`;
+  const payload = `${exp}.${nonce}.${generation}`;
   const signature = bytesToB64Url(await hmac(secret, payload));
   return `${COOKIE}=${payload}.${signature}; ${cookieFlags(requestUrl, MAX_AGE_SECONDS)}`;
 }
@@ -102,22 +109,38 @@ export function clearSessionCookie(requestUrl: string): string {
   return `${COOKIE}=; ${cookieFlags(requestUrl, 0)}`;
 }
 
-export async function hasValidSession(request: Request, secret: string): Promise<boolean> {
+export function shouldRefreshSession(exp: number): boolean {
+  return exp - Math.floor(Date.now() / 1000) < REFRESH_WITHIN_SECONDS;
+}
+
+export async function parseSession(request: Request, secret: string): Promise<ParsedSession | null> {
   const cookie = request.headers.get("Cookie") ?? "";
   const match = cookie.match(/(?:^|;\s*)ancla_session=([^;]+)/);
-  if (!match) return false;
+  if (!match) return null;
 
   const parts = match[1].split(".");
-  if (parts.length !== 3) return false;
-  const [expText, nonce, signature] = parts;
-  if (!expText || !nonce || !signature) return false;
-  if (!/^[0-9]+$/.test(expText) || !/^[0-9a-f-]{36}$/i.test(nonce)) return false;
+  let expText: string;
+  let nonce: string;
+  let genText: string;
+  let signature: string;
+  if (parts.length === 3) {
+    [expText, nonce, signature] = parts;
+    genText = "0";
+  } else if (parts.length === 4) {
+    [expText, nonce, genText, signature] = parts;
+  } else {
+    return null;
+  }
+  if (!expText || !nonce || !signature || !genText) return null;
+  if (!/^[0-9]+$/.test(expText) || !/^[0-9a-f-]{36}$/i.test(nonce) || !/^[0-9]+$/.test(genText)) return null;
 
   const exp = Number(expText);
-  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  const generation = Number(genText);
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000) || !Number.isFinite(generation)) return null;
 
-  const payload = `${expText}.${nonce}`;
+  const payload = parts.length === 3 ? `${expText}.${nonce}` : `${expText}.${nonce}.${genText}`;
   const expected = await hmac(secret, payload);
   const given = b64UrlToBytes(signature);
-  return timingSafeEqual(expected, given);
+  if (!timingSafeEqual(expected, given)) return null;
+  return { exp, generation };
 }

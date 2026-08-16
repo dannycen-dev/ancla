@@ -18,7 +18,11 @@ export function Login({ onLoggedIn }: LoginProps) {
       await login(password);
       onLoggedIn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo iniciar sesión.");
+      if (err instanceof TypeError) {
+        setError("Sin conexión. Entra una vez con red para usar Ancla sin internet.");
+      } else {
+        setError(err instanceof Error ? err.message : "No se pudo iniciar sesión.");
+      }
       setBusy(false);
     }
   }
@@ -29,19 +33,23 @@ export function Login({ onLoggedIn }: LoginProps) {
         <p className="eyebrow">Ancla</p>
         <h1>Tu plan, a la mano</h1>
         <p className="lede">
-          Entra con tu contraseña para ver comida y gym. Después de la primera visita, también funciona
-          sin internet.
+          Entra con tu contraseña para ver comida y gym. Después de la primera visita también funciona
+          sin internet. Si sales sin señal, el plan no se borra; al volver la red te pedirá la
+          contraseña otra vez.
         </p>
-        <form onSubmit={(event) => void handleSubmit(event)}>
+        <form autoComplete="on" onSubmit={(event) => void handleSubmit(event)}>
           <label htmlFor="password">Contraseña</label>
           <input
             id="password"
             name="password"
             type="password"
             autoComplete="current-password"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            enterKeyHint="go"
             maxLength={128}
             required
-            autoFocus
           />
           <p className="form-error">{error}</p>
           <button type="submit" disabled={busy}>

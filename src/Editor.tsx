@@ -12,6 +12,16 @@ import {
 } from "../shared/plan.ts";
 import { formatTime12, partsFromTime, toTime24 } from "../shared/schedule.ts";
 
+function qty(value: string): number {
+  return Number(value.replace(",", ".")) || 0;
+}
+
+function optQty(value: string): number | null {
+  if (value.trim() === "") return null;
+  const parsed = Number(value.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 const TONES: MealTone[] = ["green", "amber", "red", "muted"];
 const TONE_LABEL: Record<MealTone, string> = {
   green: "Verde",
@@ -71,12 +81,14 @@ export function Editor({ plan, busy, error, onChange, onSave, onCancel }: Editor
       <label>
         Costo de la consulta (MXN)
         <input
-          type="number"
-          min={0}
-          step="50"
+          inputMode="numeric"
+          enterKeyHint="done"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           value={plan.consultFeeMxn}
           onChange={(event) =>
-            onChange({ ...plan, consultFeeMxn: Math.max(0, Number(event.target.value) || 0) })
+            onChange({ ...plan, consultFeeMxn: Math.max(0, Number(event.target.value.replace(",", ".")) || 0) })
           }
         />
       </label>
@@ -518,26 +530,19 @@ function ProductFields({
         <label>
           Gramos o ml del empaque
           <input
-            type="number"
-            min={0}
-            step="any"
+            inputMode="decimal"
+            enterKeyHint="done"
             value={product.packQty}
-            onChange={(event) => onChange({ ...product, packQty: Number(event.target.value) || 0 })}
+            onChange={(event) => onChange({ ...product, packQty: qty(event.target.value) })}
           />
         </label>
         <label>
           Precio (MXN)
           <input
-            type="number"
-            min={0}
-            step="0.01"
+            inputMode="decimal"
+            enterKeyHint="done"
             value={product.priceMxn ?? ""}
-            onChange={(event) =>
-              onChange({
-                ...product,
-                priceMxn: event.target.value === "" ? null : Number(event.target.value),
-              })
-            }
+            onChange={(event) => onChange({ ...product, priceMxn: optQty(event.target.value) })}
             placeholder="Si no lo sabes, déjalo vacío"
           />
         </label>
@@ -546,31 +551,19 @@ function ProductFields({
         <label>
           Porciones del empaque
           <input
-            type="number"
-            min={0}
-            step="any"
+            inputMode="decimal"
+            enterKeyHint="done"
             value={product.servings ?? ""}
-            onChange={(event) =>
-              onChange({
-                ...product,
-                servings: event.target.value === "" ? null : Number(event.target.value),
-              })
-            }
+            onChange={(event) => onChange({ ...product, servings: optQty(event.target.value) })}
           />
         </label>
         <label>
           Gramos por porción
           <input
-            type="number"
-            min={0}
-            step="any"
+            inputMode="decimal"
+            enterKeyHint="done"
             value={product.servingQty ?? ""}
-            onChange={(event) =>
-              onChange({
-                ...product,
-                servingQty: event.target.value === "" ? null : Number(event.target.value),
-              })
-            }
+            onChange={(event) => onChange({ ...product, servingQty: optQty(event.target.value) })}
           />
         </label>
       </div>

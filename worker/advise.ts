@@ -26,7 +26,7 @@ Hablas en español de México, corto y claro. No eres el nutriólogo ni el entre
 Usa solo los datos del contexto. Si falta información, dilo.
 Da 3 a 6 viñetas accionables. Si hubo comida libre o se rompió la dieta, sugiere cómo volver al plan sin culpa.
 Recuerda: 3 comidas libres por semana, 2 comidas verdes al día, 3.5 L de agua, probióticos en ayunas, omega-3 con el desayuno.
-El gym empieza el 17 de agosto de 2026. Días fuertes: lunes a viernes. Sábado y domingo son descanso; si va, cardio fácil o recuperar abdomen/antebrazo, sin pesado. Abdomen y antebrazo: 2 veces por semana (lunes y viernes). Cardio opcional lun–vie.`;
+El gym empieza el 17 de agosto de 2026. Días fuertes: lunes a viernes. Sábado y domingo son descanso; si va: cardio fácil, recuperar abdomen/antebrazo, o estimar RM con 1–2 básicos a 5–8 reps (pestaña RM), sin 1RM a muerte ni día pesado completo. Abdomen y antebrazo: 2 veces por semana (lunes y viernes). Cardio opcional lun–vie.`;
 
 export async function runAdvice(
   ai: Ai,
@@ -39,16 +39,22 @@ export async function runAdvice(
     period: PayPeriod;
   },
 ): Promise<string> {
-  const result = await ai.run(ADVICE_MODEL, {
-    messages: [
-      { role: "system", content: SYSTEM },
-      { role: "user", content: `${buildContext(input)}\n\nPregunta de Dani:\n${input.question}` },
-    ],
-    max_tokens: 500,
-    temperature: 0.4,
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error("timeout")), 12_000);
   });
+  const result = await Promise.race([
+    ai.run(ADVICE_MODEL, {
+      messages: [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: `${buildContext(input).slice(0, 6_000)}\n\nPregunta de Dani:\n${input.question}` },
+      ],
+      max_tokens: 350,
+      temperature: 0.4,
+    }),
+    timeout,
+  ]);
   const text = typeof result === "object" && result && "response" in result ? String(result.response) : "";
-  const trimmed = text.trim();
+  const trimmed = text.trim().replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").slice(0, 4_000);
   if (!trimmed) throw new Error("La IA no devolvió texto.");
   return trimmed;
 }
@@ -67,8 +73,8 @@ function buildContext(input: {
   const weekFree = logs.filter((item) => item.freeMeal).length;
   const weekZero = logs.filter((item) => item.zeroCalDrink).length;
   const weekBreaks = logs.reduce((sum, item) => sum + item.dietBreaks.length, 0);
-  const grocery = buildGrocery(plan, period);
-  const coverages = coverProducts(grocery, plan.products, period, plan);
+  const wantsGrocery = /compra|despensa|acaba|precio|super|súper/i.test(input.question);
+  const coverages = wantsGrocery ? coverProducts(buildGrocery(plan, period), plan.products, period, plan) : [];
   const restock = coverages
     .filter((item) => item.packs > 0 && item.periodCost != null)
     .map((item) => `${item.product.name}: ${item.packs} empaque(s) ${formatMoney(item.periodCost ?? 0)}`)
@@ -111,7 +117,7 @@ function buildContext(input: {
   const gymToday =
     mains.length === 0
       ? isWeekendDay(date)
-        ? "Fin de semana de descanso. Si va al gym: cardio fácil 25–30 min o recuperar abdomen/antebrazo si faltó; sin día pesado."
+        ? "Fin de semana de descanso. Si va: cardio fácil, recuperar abdomen/antebrazo, o estimar RM con 1–2 básicos a 5–8 reps (sin 1RM a muerte)."
         : "Descanso de pesas."
       : mains
           .map((session) => {

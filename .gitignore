@@ -32,3 +32,9 @@ dist-ssr
 
 # Drop folder of raw GIFs; the app serves public/exercises
 gif-exercises
+
+# Playwright
+test-results
+playwright-report
+blob-report
+playwright/.cache

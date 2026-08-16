@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { emptyLog, clockFromStamp, formatDuration, gymDurationMinutes, stampFromDateAndClock, type DayLog } from "../shared/log.ts";
+import { emptyLog, clockFromStamp, formatDuration, gymDurationMinutes, stampEndFromDateAndClock, stampFromDateAndClock, type DayLog } from "../shared/log.ts";
 import type { Plan } from "../shared/plan.ts";
 import {
   WEEK_ORDER,
@@ -7,14 +7,17 @@ import {
   dayName,
   dayShort,
   formatDayLong,
-  localDateISO,
   parseISODate,
+  TRAINING_WEEK_CUTOVER_HOUR,
+  trainingDateISO,
   weekdayFromISO,
 } from "../shared/schedule.ts";
+import { rmKgForExercise, weekDataCounts, weekLiftStats } from "../shared/stats.ts";
 import {
   BLOCK_LABEL,
   accessorySessions,
   accessorySessionsForDate,
+  addRmEntry,
   cardioApplies,
   cycleWeek,
   emptyLoads,
@@ -23,29 +26,38 @@ import {
   loadForWeek,
   mainSessionsForDate,
   mediaCaption,
+  parseSetSlots,
+  setsForSlots,
   setLoad,
   systemFor,
   weekdaySummary,
   type ExerciseLoad,
+  type RmEntry,
   type TrainingExercise,
   type TrainingLoads,
   type TrainingSession,
 } from "../shared/training.ts";
-import { loadDay, saveDay, saveLoads } from "./api.ts";
+import { parseWeight } from "../shared/rm.ts";
+import { coachSets } from "../shared/setCoach.ts";
+import { AuthError, loadDay, saveDay, saveLoads } from "./api.ts";
 import { RmCalculator } from "./RmCalculator.tsx";
+import { SetTimer } from "./SetTimer.tsx";
+import { SyncBanner } from "./SyncBanner.tsx";
 import { useNow } from "./useNow.ts";
 
 type TrainingViewProps = {
   plan: Plan;
   fromCache: boolean;
+  pending: boolean;
   onHome: () => void;
   onEdit: () => void;
   onLogout: () => void;
+  onAuthLost: () => void;
 };
 
-export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: TrainingViewProps) {
+export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogout, onAuthLost }: TrainingViewProps) {
   const now = useNow();
-  const todayIso = localDateISO(now);
+  const todayIso = trainingDateISO(now);
   const training = plan.training;
   const [tab, setTab] = useState<"hoy" | "guia" | "rm">("hoy");
   const [followNow, setFollowNow] = useState(true);
@@ -55,9 +67,15 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
   const [accessoryCounts, setAccessoryCounts] = useState<Record<string, number>>({});
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const logGen = useRef(0);
+  const loadGen = useRef(0);
   const loadsRef = useRef(loads);
   loadsRef.current = loads;
+  const logRef = useRef(log);
+  logRef.current = log;
   const selectedDate = followNow ? todayIso : pickedDate;
+  const dayReady = log.date === selectedDate;
+  const view = dayReady ? log : emptyLog(selectedDate);
   const jsDay = weekdayFromISO(selectedDate);
   const week = cycleWeek(selectedDate, training.startedOn, training.weekCount);
   const beforeStart = isBeforeStart(selectedDate, training.startedOn);
@@ -66,7 +84,7 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
   const accessories = accessorySessions(training);
   const weekend = isWeekendDay(selectedDate);
   const showCardio = cardioApplies(training, selectedDate) || weekend;
-  const durationMinutes = gymDurationMinutes(log.gymStartedAt, log.gymEndedAt);
+  const durationMinutes = gymDurationMinutes(view.gymStartedAt, view.gymEndedAt);
   const durationLabel = durationMinutes ? formatDuration(durationMinutes) : "";
 
   function goToDate(next: string) {
@@ -77,30 +95,55 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
 
   useEffect(() => {
     let cancelled = false;
-    void loadDay(selectedDate).then((result) => {
-      if (cancelled) return;
-      setLog(result.log);
-      setLoads(result.loads);
-      setAccessoryCounts(result.accessoryCounts);
-    });
+    const nextLogGen = ++logGen.current;
+    const nextLoadGen = ++loadGen.current;
+    void loadDay(selectedDate)
+      .then((result) => {
+        if (cancelled) return;
+        if (nextLogGen === logGen.current) {
+          setLog(result.log);
+          setAccessoryCounts(result.accessoryCounts);
+        }
+        if (nextLoadGen === loadGen.current) setLoads(result.loads);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof AuthError) onAuthLost();
+      });
     return () => {
       cancelled = true;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      if (loadTimer.current) clearTimeout(loadTimer.current);
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        void saveDay(logRef.current).catch((err: unknown) => {
+          if (err instanceof AuthError) onAuthLost();
+        });
+      }
+      if (loadTimer.current) {
+        clearTimeout(loadTimer.current);
+        loadTimer.current = null;
+        persistLoads(loadsRef.current);
+      }
     };
   }, [selectedDate]);
 
   function patchLog(next: DayLog) {
+    if (next.date !== selectedDate) return;
+    logGen.current += 1;
     setLog(next);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      void saveDay(next).then((result) => {
-        setAccessoryCounts(result.accessoryCounts);
-      });
+      void saveDay(next)
+        .then((result) => {
+          setAccessoryCounts(result.accessoryCounts);
+        })
+        .catch((err: unknown) => {
+          if (err instanceof AuthError) onAuthLost();
+        });
     }, 250);
   }
 
   function toggleExercise(id: string, session?: TrainingSession) {
+    if (log.date !== selectedDate) return;
     const doneExerciseIds = log.doneExerciseIds.includes(id)
       ? log.doneExerciseIds.filter((item) => item !== id)
       : [...log.doneExerciseIds, id];
@@ -119,6 +162,7 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
   }
 
   function toggleSession(id: string) {
+    if (log.date !== selectedDate) return;
     const doneSessionIds = log.doneSessionIds.includes(id)
       ? log.doneSessionIds.filter((item) => item !== id)
       : [...log.doneSessionIds, id];
@@ -133,19 +177,59 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
     commitLoad(exerciseId, value, true);
   }
 
+  function persistLoads(next: TrainingLoads) {
+    void saveLoads(next).catch((err: unknown) => {
+      if (err instanceof AuthError) onAuthLost();
+    });
+  }
+
   function commitLoad(exerciseId: string, value: ExerciseLoad, immediate: boolean) {
-    const next = setLoad(loadsRef.current, exerciseId, week, value, training.weekCount);
+    const next = setLoad(loadsRef.current, exerciseId, week, value, training.weekCount, selectedDate);
     loadsRef.current = next;
     setLoads(next);
+    loadGen.current += 1;
     if (loadTimer.current) clearTimeout(loadTimer.current);
     if (immediate) {
-      void saveLoads(next);
+      persistLoads(next);
       return;
     }
     loadTimer.current = setTimeout(() => {
-      void saveLoads(next);
+      persistLoads(next);
     }, 400);
   }
+
+  function saveRm(entry: RmEntry) {
+    const next = addRmEntry(loadsRef.current, entry);
+    loadsRef.current = next;
+    setLoads(next);
+    loadGen.current += 1;
+    persistLoads(next);
+  }
+
+  useEffect(() => {
+    function flushDraft() {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        void saveDay(logRef.current).catch((err: unknown) => {
+          if (err instanceof AuthError) onAuthLost();
+        });
+      }
+      if (loadTimer.current) {
+        clearTimeout(loadTimer.current);
+        loadTimer.current = null;
+        persistLoads(loadsRef.current);
+      }
+    }
+    window.addEventListener("ancla-flush-drafts", flushDraft);
+    return () => window.removeEventListener("ancla-flush-drafts", flushDraft);
+  }, []);
+
+  const liftNames = [
+    ...new Set(training.sessions.flatMap((session) => session.exercises.map((item) => item.name))),
+  ];
+  const counts = weekDataCounts(loads, week);
+  const priorStats = week > 1 ? weekLiftStats(training, loads, week - 1) : [];
 
   return (
     <main className="page">
@@ -168,12 +252,10 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
         </div>
       </header>
 
-      {fromCache ? (
-        <p className="banner">Sin conexión. Mostrando la última versión guardada en este teléfono.</p>
-      ) : null}
+      <SyncBanner fromCache={fromCache} pending={pending} />
 
       <nav className="dock dock-3" aria-label="Vistas">
-        <button type="button" className={tab === "hoy" ? "is-active" : ""} onClick={() => goToDate(todayIso)}>
+        <button type="button" className={tab === "hoy" ? "is-active" : ""} onClick={() => setTab("hoy")}>
           Hoy
         </button>
         <button type="button" className={tab === "guia" ? "is-active" : ""} onClick={() => setTab("guia")}>
@@ -184,31 +266,49 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
         </button>
       </nav>
 
+      <nav className="week" aria-label="Día de la semana">
+        {WEEK_ORDER.map((day) => {
+          const iso = dateForWeekday(day, parseISODate(selectedDate));
+          return (
+            <button
+              key={day}
+              type="button"
+              className={iso === selectedDate ? "is-active" : ""}
+              aria-pressed={iso === selectedDate}
+              aria-current={iso === todayIso ? "date" : undefined}
+              onClick={() => goToDate(iso)}
+            >
+              <span>{dayShort(day)}</span>
+              {iso === todayIso ? <em>hoy</em> : null}
+            </button>
+          );
+        })}
+      </nav>
+
+      {now.getDay() === 1 && now.getHours() < TRAINING_WEEK_CUTOVER_HOUR ? (
+        <p className="now-banner is-before">
+          Hasta la 1:00 a.m. esto cuenta como domingo, semana {week}.
+        </p>
+      ) : null}
+
       {tab === "guia" ? <Guide training={training} /> : null}
-      {tab === "rm" ? <RmCalculator /> : null}
+      {tab === "rm" ? (
+        <RmCalculator
+          week={week}
+          date={selectedDate}
+          liftNames={liftNames}
+          entries={loads.rms ?? []}
+          onSave={saveRm}
+        />
+      ) : null}
       {tab === "hoy" ? (
         <>
-          <nav className="week" aria-label="Día de la semana">
-            {WEEK_ORDER.map((day) => {
-              const iso = dateForWeekday(day, parseISODate(selectedDate));
-              return (
-                <button
-                  key={day}
-                  type="button"
-                  className={iso === selectedDate ? "is-active" : ""}
-                  aria-current={iso === todayIso ? "date" : undefined}
-                  onClick={() => goToDate(iso)}
-                >
-                  <span>{dayShort(day)}</span>
-                  {iso === todayIso ? <em>hoy</em> : null}
-                </button>
-              );
-            })}
-          </nav>
-
           <p className="meta">
-            Semana {week} de {training.weekCount} · empieza el {formatDayLong(training.startedOn)}
+            Semana {week} de {training.weekCount} · empieza el {formatDayLong(training.startedOn)} ·
+            corte lunes 1:00 a.m.
           </p>
+
+          <WeekStatsBanner week={week} counts={counts} priorStats={priorStats} />
 
           {beforeStart ? (
             <p className="now-banner is-before">
@@ -228,23 +328,28 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
               <h2>Inicio</h2>
               <button
                 type="button"
-                className={`check ${log.gymStartedAt ? "is-on" : ""}`}
-                onClick={() => patchLog({ ...log, gymStartedAt: new Date().toISOString() })}
+                className={`check ${view.gymStartedAt ? "is-on" : ""}`}
+                onClick={() => {
+                  const stamp =
+                    stampFromDateAndClock(selectedDate, clockFromStamp(new Date().toISOString())) ??
+                    new Date().toISOString();
+                  patchLog({ ...log, gymStartedAt: stamp });
+                }}
               >
-                {log.gymStartedAt ? "Actualizar ahora" : "Empezar ahora"}
+                {view.gymStartedAt ? "Actualizar ahora" : "Empezar ahora"}
               </button>
             </div>
             <label>
               Hora en que inicié
               <input
                 type="time"
-                value={clockFromStamp(log.gymStartedAt)}
-                onChange={(event) =>
-                  patchLog({
-                    ...log,
-                    gymStartedAt: stampFromDateAndClock(selectedDate, event.target.value),
-                  })
-                }
+                step="60"
+                autoComplete="off"
+                value={clockFromStamp(view.gymStartedAt)}
+                onChange={(event) => {
+                  const stamp = stampFromDateAndClock(selectedDate, event.target.value);
+                  if (stamp) patchLog({ ...log, gymStartedAt: stamp });
+                }}
               />
             </label>
           </section>
@@ -254,12 +359,19 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
               <section className="goal-card">
                 <h2>Fin de semana · descanso</h2>
                 <p>Lunes a viernes son los días fuertes. Si no vienes, perfecto.</p>
-                <p>Si te decides ir, ve suave:</p>
+                <p>Si te decides ir, elige una cosa (no las tres):</p>
                 <ul className="recs">
                   <li>Cardio fácil 25–30 min (caminadora con inclinación o elíptica, ritmo de conversación).</li>
-                  <li>Si te faltó abdomen o antebrazo en la semana, recupera ese bloque aquí y ya.</li>
-                  <li>Si ya vas 2/2, quédate en cardio o una caminata. Cero sentadilla, peso muerto ni presses pesados.</li>
-                  <li>El domingo, si también vas, aún más ligero: caminata o movilidad. No hagas dos días extra de gym duro.</li>
+                  <li>Si te faltó abdomen o antebrazo, recupera ese bloque y ya.</li>
+                  <li>
+                    Estimar RM: 1 o 2 básicos (press, sentadilla/hack, peso muerto o remo). Sube hasta un
+                    set de 5–8 reps duras, anota peso y reps en la pestaña RM. Eso queda en esta
+                    semana hasta el lunes 1:00 a.m. No busques el 1RM a muerte.
+                  </li>
+                  <li>
+                    Mejor el domingo si el sábado descansaste. Si ya estimaste RM un día, el otro
+                    que sea solo caminata o descanso.
+                  </li>
                 </ul>
               </section>
             ) : (
@@ -276,7 +388,7 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
               session={session}
               week={week}
               weekCount={training.weekCount}
-              log={log}
+              log={view}
               loads={loads}
               training={training}
               onToggle={toggleExercise}
@@ -286,16 +398,16 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
           ))}
 
           {showCardio ? (
-            <section className={`habit ${log.cardioDone ? "is-complete" : ""}`}>
+            <section className={`habit ${view.cardioDone ? "is-complete" : ""}`}>
               <div className="habit-head">
                 <h2>{weekend ? "Cardio fácil si vienes" : "Cardio opcional"}</h2>
                 <button
                   type="button"
-                  className={`check ${log.cardioDone ? "is-on" : ""}`}
-                  aria-pressed={log.cardioDone}
+                  className={`check ${view.cardioDone ? "is-on" : ""}`}
+                  aria-pressed={view.cardioDone}
                   onClick={() => patchLog({ ...log, cardioDone: !log.cardioDone })}
                 >
-                  {log.cardioDone ? "Hecho" : "Marcar"}
+                  {view.cardioDone ? "Hecho" : "Marcar"}
                 </button>
               </div>
               <ul className="recs">
@@ -309,7 +421,7 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
           {accessoriesToday.map((session) => {
             const weekDone = accessoryCounts[session.id] ?? 0;
             const goal = session.weeklyGoal ?? 2;
-            const today = log.doneSessionIds.includes(session.id);
+            const today = view.doneSessionIds.includes(session.id);
             return (
               <section key={session.id} className={`habit ${today ? "is-complete" : ""}`}>
                 <div className="habit-head">
@@ -328,8 +440,10 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
                     exercise={exercise}
                     week={week}
                     weekCount={training.weekCount}
-                    done={log.doneExerciseIds.includes(exercise.id)}
+                    done={view.doneExerciseIds.includes(exercise.id)}
                     load={loadForWeek(loads, exercise.id, week)}
+                    priorSets={week > 1 ? loadForWeek(loads, exercise.id, week - 1).sets : []}
+                    knownRm={week > 1 ? rmKgForExercise(loads.rms ?? [], exercise.name, week - 1) : null}
                     system={systemFor(training, exercise.systemId)}
                     onToggle={() => toggleExercise(exercise.id, session)}
                     onLoad={(value) => patchLoad(exercise.id, value)}
@@ -352,7 +466,7 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
               const weekDone = accessoryCounts[session.id] ?? 0;
               const goal = session.weeklyGoal ?? 2;
               const behind = weekDone < goal;
-              const today = log.doneSessionIds.includes(session.id);
+              const today = view.doneSessionIds.includes(session.id);
               if (weekend && behind) {
                 return (
                   <section key={session.id} className={`habit ${today ? "is-complete" : ""}`}>
@@ -371,8 +485,10 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
                         exercise={exercise}
                         week={week}
                         weekCount={training.weekCount}
-                        done={log.doneExerciseIds.includes(exercise.id)}
+                        done={view.doneExerciseIds.includes(exercise.id)}
                         load={loadForWeek(loads, exercise.id, week)}
+                        priorSets={week > 1 ? loadForWeek(loads, exercise.id, week - 1).sets : []}
+                        knownRm={week > 1 ? rmKgForExercise(loads.rms ?? [], exercise.name, week - 1) : null}
                         system={systemFor(training, exercise.systemId)}
                         onToggle={() => toggleExercise(exercise.id, session)}
                         onLoad={(value) => patchLoad(exercise.id, value)}
@@ -410,23 +526,31 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
               <h2>Término</h2>
               <button
                 type="button"
-                className={`check ${log.gymEndedAt ? "is-on" : ""}`}
-                onClick={() => patchLog({ ...log, gymEndedAt: new Date().toISOString() })}
+                className={`check ${view.gymEndedAt ? "is-on" : ""}`}
+                onClick={() => {
+                  const stamp =
+                    stampEndFromDateAndClock(
+                      selectedDate,
+                      clockFromStamp(new Date().toISOString()),
+                      log.gymStartedAt,
+                    ) ?? new Date().toISOString();
+                  patchLog({ ...log, gymEndedAt: stamp });
+                }}
               >
-                {log.gymEndedAt ? "Actualizar ahora" : "Terminar ahora"}
+                {view.gymEndedAt ? "Actualizar ahora" : "Terminar ahora"}
               </button>
             </div>
             <label>
               Hora en que terminé
               <input
                 type="time"
-                value={clockFromStamp(log.gymEndedAt)}
-                onChange={(event) =>
-                  patchLog({
-                    ...log,
-                    gymEndedAt: stampFromDateAndClock(selectedDate, event.target.value),
-                  })
-                }
+                step="60"
+                autoComplete="off"
+                value={clockFromStamp(view.gymEndedAt)}
+                onChange={(event) => {
+                  const stamp = stampEndFromDateAndClock(selectedDate, event.target.value, log.gymStartedAt);
+                  if (stamp) patchLog({ ...log, gymEndedAt: stamp });
+                }}
               />
             </label>
             {durationLabel ? (
@@ -446,6 +570,69 @@ export function TrainingView({ plan, fromCache, onHome, onEdit, onLogout }: Trai
         </>
       ) : null}
     </main>
+  );
+}
+
+function WeekStatsBanner({
+  week,
+  counts,
+  priorStats,
+}: {
+  week: number;
+  counts: { snapshots: number; rms: number };
+  priorStats: ReturnType<typeof weekLiftStats>;
+}) {
+  if (week <= 1) {
+    const bits: string[] = [];
+    if (counts.snapshots > 0) {
+      bits.push(`${counts.snapshots} ejercicio${counts.snapshots === 1 ? "" : "s"} con peso`);
+    }
+    if (counts.rms > 0) {
+      bits.push(`${counts.rms} RM`);
+    }
+    const saved = bits.length
+      ? `Van ${bits.join(" y ")}.`
+      : "Los pesos, series y RM se van guardando.";
+    return (
+      <p className="now-banner is-before">
+        {saved} El corte de semana es lunes 1:00 a.m., para que el RM del sábado o domingo (aunque
+        lo anotes pasado medianoche) entre en la semana 1.
+      </p>
+    );
+  }
+
+  return (
+    <section className="panel week-stats">
+      <p className="eyebrow">Stats semana {week - 1}</p>
+      <h2>Marcas para esta semana</h2>
+      {priorStats.length === 0 ? (
+        <p>
+          Aún no hay pesos ni RM de la semana {week - 1}. Anota series o usa la pestaña RM; el corte
+          sigue siendo lunes 1:00 a.m.
+        </p>
+      ) : (
+        <>
+          <p>
+            Con esto se sugieren las cargas de la semana {week}. Si el fin de semana estimaste RM,
+            ya está metido aquí.
+          </p>
+          <ul className="week-stats-list">
+            {priorStats.map((stat) => (
+              <li key={`${stat.exerciseId}-${stat.name}`}>
+                <span>
+                  <strong>{stat.name}</strong>
+                  <em>
+                    {stat.topSet}
+                    {stat.source ? ` · ${stat.source}` : ""}
+                  </em>
+                </span>
+                <strong>{stat.estimatedRm != null ? `${stat.estimatedRm} kg RM` : "—"}</strong>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -488,6 +675,8 @@ function SessionBlock({
           weekCount={weekCount}
           done={log.doneExerciseIds.includes(exercise.id)}
           load={loadForWeek(loads, exercise.id, week)}
+          priorSets={week > 1 ? loadForWeek(loads, exercise.id, week - 1).sets : []}
+          knownRm={week > 1 ? rmKgForExercise(loads.rms ?? [], exercise.name, week - 1) : null}
           system={systemFor(training, exercise.systemId)}
           onToggle={() => onToggle(exercise.id)}
           onLoad={(value) => onLoad(exercise.id, value)}
@@ -504,6 +693,8 @@ function ExerciseRow({
   weekCount,
   done,
   load,
+  priorSets,
+  knownRm,
   system,
   onToggle,
   onLoad,
@@ -514,6 +705,8 @@ function ExerciseRow({
   weekCount: number;
   done: boolean;
   load: ExerciseLoad;
+  priorSets?: ExerciseLoad["sets"];
+  knownRm?: number | null;
   system?: ReturnType<typeof systemFor>;
   onToggle: () => void;
   onLoad: (value: ExerciseLoad) => void;
@@ -523,11 +716,38 @@ function ExerciseRow({
   const [noteOpen, setNoteOpen] = useState(Boolean(load.note));
   const [noteDraft, setNoteDraft] = useState(load.note);
   const [noteSaved, setNoteSaved] = useState(false);
+  const slots = parseSetSlots(exercise.prescription);
+  const sets = setsForSlots(load, slots.length);
+  const coach = coachSets({
+    prescription: exercise.prescription,
+    name: exercise.name,
+    systemId: exercise.systemId,
+    systemName: system?.name,
+    slots,
+    sets,
+    priorSets,
+    knownRm,
+    knownRmSource: "RM guardado de la semana pasada",
+  });
+  const sharedTimer = coach.timers.find((item) => item && (item.mode === "rest" || item.steps));
 
   useEffect(() => {
     setNoteDraft(load.note);
     if (load.note) setNoteOpen(true);
   }, [exercise.id, week, load.note]);
+
+  function patchSet(index: number, next: Partial<(typeof sets)[number]>) {
+    onLoad({
+      ...load,
+      sets: sets.map((item, i) => (i === index ? { ...item, ...next } : item)),
+    });
+  }
+
+  function bumpWeight(index: number, delta: number) {
+    const current = parseWeight(sets[index].weight) ?? 0;
+    const next = Math.max(0, Math.round((current + delta) * 2) / 2);
+    patchSet(index, { weight: Number.isInteger(next) ? String(next) : next.toFixed(1) });
+  }
 
   return (
     <article className={`exercise ${done ? "is-done" : ""}`}>
@@ -537,7 +757,9 @@ function ExerciseRow({
           {done ? "Hecho" : "Marcar"}
         </button>
       </div>
-      <p>{exercise.prescription}</p>
+      <p className="meta">
+        {exercise.prescription} · semana {week}/{weekCount}
+      </p>
       {exercise.media.length > 0 ? (
         <div className={exercise.media.length > 1 ? "exercise-media-grid" : undefined}>
           {exercise.media.map((src) => (
@@ -548,45 +770,103 @@ function ExerciseRow({
           ))}
         </div>
       ) : null}
-      {system ? (
-        <div className="system-hint">
-          <button
-            type="button"
-            className={`tone-chip ${open ? "is-open" : ""}`}
-            aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
-          >
-            {system.name}
-          </button>
-          {open ? <p className="system-body">{system.body}</p> : null}
-        </div>
-      ) : null}
-      <div className="load-row">
-        <label>
-          Peso semana {week}/{weekCount}
-          <input
-            value={load.weight}
-            inputMode="decimal"
-            placeholder="0"
-            onChange={(event) => onLoad({ ...load, weight: event.target.value })}
-          />
-        </label>
-        <div className="unit-picks" role="group" aria-label="Unidad">
-          <button
-            type="button"
-            className={load.unit === "kg" ? "is-on" : ""}
-            onClick={() => onLoad({ ...load, unit: "kg" })}
-          >
-            KG
-          </button>
-          <button
-            type="button"
-            className={load.unit === "lb" ? "is-on" : ""}
-            onClick={() => onLoad({ ...load, unit: "lb" })}
-          >
-            Libras
-          </button>
-        </div>
+      <div className={`system-hint ${coach.empty ? "is-empty" : ""}`}>
+        <p className="tone-chip">{coach.title}</p>
+        <p className="system-body">{coach.prompt}</p>
+        {coach.howto.length > 0 ? (
+          <ol className="coach-howto">
+            {coach.howto.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ol>
+        ) : null}
+        {coach.details.length > 0 ? (
+          <ul className="coach-lines">
+            {coach.details.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
+        {sharedTimer ? <SetTimer timer={sharedTimer} /> : null}
+        {system?.body ? (
+          <>
+            <button
+              type="button"
+              className="ghost coach-more"
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+            >
+              {open ? "Ocultar explicación" : "Cómo se hace"}
+            </button>
+            {open ? <p className="system-more">{system.body}</p> : null}
+          </>
+        ) : null}
+      </div>
+      <div className="set-loads">
+        {slots.map((slot, index) => {
+          const set = sets[index];
+          const suggested = coach.suggested[index];
+          const timer = coach.timers[index];
+          const showTimer = Boolean(timer && timer.mode === "work" && !timer.steps);
+          const isAnchor = coach.empty && index === coach.anchorIndex;
+          return (
+            <div key={slot.key} className={`set-load ${isAnchor ? "is-anchor" : ""}`}>
+              <p>{slot.label}</p>
+              {slot.hint ? <p className="set-load-hint">{slot.hint}</p> : null}
+              {suggested ? (
+                <button
+                  type="button"
+                  className="ghost load-suggest"
+                  onClick={() => patchSet(index, { weight: suggested })}
+                >
+                  Usar {suggested} {set.unit}
+                </button>
+              ) : null}
+              {showTimer && timer ? <SetTimer timer={timer} /> : null}
+              {coach.hideWeight[index] ? null : (
+                <>
+              <div className="load-row">
+                <input
+                  value={set.weight}
+                  inputMode="decimal"
+                  enterKeyHint="done"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder={suggested ?? "0"}
+                  aria-label={`Peso ${slot.label}`}
+                  onChange={(event) => patchSet(index, { weight: event.target.value })}
+                />
+                <div className="unit-picks" role="group" aria-label={`Unidad ${slot.label}`}>
+                  <button
+                    type="button"
+                    className={set.unit === "kg" ? "is-on" : ""}
+                    onClick={() => patchSet(index, { unit: "kg" })}
+                  >
+                    kg
+                  </button>
+                  <button
+                    type="button"
+                    className={set.unit === "lb" ? "is-on" : ""}
+                    onClick={() => patchSet(index, { unit: "lb" })}
+                  >
+                    lb
+                  </button>
+                </div>
+              </div>
+              <div className="weight-nudge" role="group" aria-label={`Ajuste ${slot.label}`}>
+                <button type="button" className="ghost" onClick={() => bumpWeight(index, -2.5)}>
+                  −2.5
+                </button>
+                <button type="button" className="ghost" onClick={() => bumpWeight(index, 2.5)}>
+                  +2.5
+                </button>
+              </div>
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
       {noteOpen ? (
         <div className="load-note">
@@ -605,7 +885,7 @@ function ExerciseRow({
           <button
             type="button"
             onClick={() => {
-              onSaveNote({ ...load, note: noteDraft.trim() });
+              onSaveNote({ ...load, note: noteDraft.trim(), sets });
               setNoteSaved(true);
               if (!noteDraft.trim()) setNoteOpen(false);
             }}

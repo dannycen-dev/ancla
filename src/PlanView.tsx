@@ -27,10 +27,11 @@ import {
   variationIndex,
   weekdayFromISO,
 } from "../shared/schedule.ts";
-import { loadDay, saveDay } from "./api.ts";
+import { AuthError, loadDay, saveDay } from "./api.ts";
 import { Calendar } from "./Calendar.tsx";
 import { Coach } from "./Coach.tsx";
 import { Pantry } from "./Pantry.tsx";
+import { SyncBanner } from "./SyncBanner.tsx";
 import { useNow } from "./useNow.ts";
 
 const TONE_LABEL: Record<MealTone, string> = {
@@ -43,12 +44,14 @@ const TONE_LABEL: Record<MealTone, string> = {
 type PlanViewProps = {
   plan: Plan;
   fromCache: boolean;
+  pending: boolean;
   onHome: () => void;
   onEdit: () => void;
   onLogout: () => void;
+  onAuthLost: () => void;
 };
 
-export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanViewProps) {
+export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, onAuthLost }: PlanViewProps) {
   const now = useNow();
   const todayIso = localDateISO(now);
   const [tab, setTab] = useState<"hoy" | "despensa" | "ia" | "progreso">("hoy");
@@ -60,6 +63,9 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
   const [weekFreeMeals, setWeekFreeMeals] = useState(0);
   const [weekDietBreaks, setWeekDietBreaks] = useState(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const logRef = useRef(log);
+  logRef.current = log;
+  const loadGen = useRef(0);
   const selectedDate = followNow ? todayIso : pickedDate;
   const jsDay = weekdayFromISO(selectedDate);
   const date = selectedDate;
@@ -73,7 +79,6 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
   const status = nowStatus(slots, now);
   const currentId = isToday ? status.currentId : null;
   const greenToday = useMemo(() => greenMealsForDay(plan, jsDay), [plan, jsDay]);
-  const greenDone = greenToday.filter((item) => log.doneSlotIds.includes(item.slotId)).length;
 
   function goToDate(next: string) {
     setPickedDate(next);
@@ -83,18 +88,41 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
 
   useEffect(() => {
     let cancelled = false;
-    void loadDay(date).then((result) => {
-      if (cancelled) return;
-      setLog(result.log);
-      setWeekZeroCal(result.weekZeroCal);
-      setWeekFreeMeals(result.weekFreeMeals);
-      setWeekDietBreaks(result.weekDietBreaks);
-    });
+    const gen = ++loadGen.current;
+    void loadDay(date)
+      .then((result) => {
+        if (cancelled || gen !== loadGen.current) return;
+        setLog(result.log);
+        setWeekZeroCal(result.weekZeroCal);
+        setWeekFreeMeals(result.weekFreeMeals);
+        setWeekDietBreaks(result.weekDietBreaks);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof AuthError) onAuthLost();
+      });
     return () => {
       cancelled = true;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (!saveTimer.current) return;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      persist(logRef.current);
     };
   }, [date]);
+
+  const dayReady = log.date === date;
+  const view = dayReady ? log : emptyLog(date);
+  const greenDone = greenToday.filter((item) => view.doneSlotIds.includes(item.slotId)).length;
+
+  useEffect(() => {
+    function flushDraft() {
+      if (!saveTimer.current) return;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      persist(logRef.current);
+    }
+    window.addEventListener("ancla-flush-drafts", flushDraft);
+    return () => window.removeEventListener("ancla-flush-drafts", flushDraft);
+  }, []);
 
   function applyWeek(result: { weekZeroCal: number; weekFreeMeals: number; weekDietBreaks: number }) {
     setWeekZeroCal(result.weekZeroCal);
@@ -102,20 +130,28 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
     setWeekDietBreaks(result.weekDietBreaks);
   }
 
+  function persist(next: DayLog) {
+    void saveDay(next)
+      .then(applyWeek)
+      .catch((err: unknown) => {
+        if (err instanceof AuthError) onAuthLost();
+      });
+  }
+
   function patchLog(next: DayLog, debounce = false) {
+    if (next.date !== date) return;
+    loadGen.current += 1;
     setLog(next);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    const save = () => {
-      void saveDay(next).then(applyWeek);
-    };
     if (debounce) {
-      saveTimer.current = setTimeout(save, 400);
+      saveTimer.current = setTimeout(() => persist(next), 400);
       return;
     }
-    save();
+    persist(next);
   }
 
   function toggleSlot(id: string) {
+    if (log.date !== date) return;
     const doneSlotIds = log.doneSlotIds.includes(id)
       ? log.doneSlotIds.filter((item) => item !== id)
       : [...log.doneSlotIds, id];
@@ -124,9 +160,11 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
 
   useEffect(() => {
     if (!currentId || tab !== "hoy") return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
     document.getElementById(`slot-${currentId}`)?.scrollIntoView({
       behavior: "smooth",
-      block: "center",
+      block: "nearest",
     });
   }, [currentId, tab]);
 
@@ -135,8 +173,8 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
       <header className="topbar">
         <div>
           <p className="eyebrow">{isToday ? "Ahora mismo" : "Menú del día"}</p>
-          <h1>{isToday ? formatNowLong(now) : dayName(jsDay)}</h1>
-          <p className="meta">{isToday ? "Hora de tu teléfono" : formatDayLong(selectedDate)}</p>
+          <h1>{dayName(jsDay)}</h1>
+          <p className="meta">{isToday ? formatNowLong(now) : formatDayLong(selectedDate)}</p>
         </div>
         <div className="topbar-actions">
           <button type="button" className="ghost" onClick={onHome}>
@@ -151,12 +189,10 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
         </div>
       </header>
 
-      {fromCache ? (
-        <p className="banner">Sin conexión. Mostrando la última versión guardada en este teléfono.</p>
-      ) : null}
+      <SyncBanner fromCache={fromCache} pending={pending} />
 
       <nav className="dock" aria-label="Vistas">
-        <button type="button" className={tab === "hoy" ? "is-active" : ""} onClick={() => goToDate(todayIso)}>
+        <button type="button" className={tab === "hoy" ? "is-active" : ""} onClick={() => setTab("hoy")}>
           Hoy
         </button>
         <button
@@ -178,9 +214,9 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
         </button>
       </nav>
 
-      {tab === "despensa" ? <Pantry plan={plan} todayIso={todayIso} /> : null}
+      {tab === "despensa" ? <Pantry plan={plan} todayIso={todayIso} onAuthLost={onAuthLost} /> : null}
 
-      {tab === "ia" ? <Coach date={selectedDate} /> : null}
+      {tab === "ia" ? <Coach date={selectedDate} onAuthLost={onAuthLost} /> : null}
 
       {tab === "progreso" ? (
         <Calendar
@@ -188,6 +224,7 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
           selectedDate={selectedDate}
           todayIso={todayIso}
           onSelectDate={goToDate}
+          onAuthLost={onAuthLost}
         />
       ) : null}
 
@@ -243,7 +280,7 @@ export function PlanView({ plan, fromCache, onHome, onEdit, onLogout }: PlanView
               plan={plan}
               jsDay={jsDay}
               current={slot.id === currentId}
-              done={log.doneSlotIds.includes(slot.id)}
+              done={view.doneSlotIds.includes(slot.id)}
               onToggle={() => toggleSlot(slot.id)}
             />
           </li>

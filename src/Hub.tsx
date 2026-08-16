@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { AuthError, changePassword } from "./api.ts";
+import { SyncBanner } from "./SyncBanner.tsx";
 
 type HubProps = {
   title: string;
   fromCache: boolean;
+  pending: boolean;
   onFood: () => void;
   onGym: () => void;
   onLogout: () => void;
 };
 
-export function Hub({ title, fromCache, onFood, onGym, onLogout }: HubProps) {
+export function Hub({ title, fromCache, pending, onFood, onGym, onLogout }: HubProps) {
   const [showPassword, setShowPassword] = useState(false);
 
   return (
@@ -30,9 +32,7 @@ export function Hub({ title, fromCache, onFood, onGym, onLogout }: HubProps) {
         </div>
       </header>
 
-      {fromCache ? (
-        <p className="banner">Sin conexión. Mostrando la última versión guardada en este teléfono.</p>
-      ) : null}
+      <SyncBanner fromCache={fromCache} pending={pending} />
 
       {showPassword ? <PasswordForm onCancel={() => setShowPassword(false)} onAuthLost={onLogout} /> : null}
 

@@ -78,7 +78,7 @@ export const seedTraining: TrainingPlan = {
     "Todos los ejercicios cerca del fallo: 4–6 reps con peso demandante; 12–15 reps con un peso que te deje completar la serie.",
     "Si un ejercicio va 1x12 y luego 2x6, la primera serie es moderada y las dos últimas más pesadas.",
     "No hace falta testear el RM en el gym: estima con la calculadora de la pestaña RM (misma fórmula que Soy Powerlifter).",
-    "Los días fuertes son lunes a viernes. Sábado y domingo son descanso; si te decides ir, cardio fácil o recuperar abdomen/antebrazo, sin otro día pesado.",
+    "Los días fuertes son lunes a viernes. Sábado y domingo son descanso. Si te decides ir: cardio fácil, recuperar abdomen/antebrazo, o una sesión corta para estimar RM (1 o 2 básicos a 5–8 reps duras, pestaña RM). No hagas 1RM a muerte ni otro día pesado completo.",
     "Abdomen y antebrazo van 2 veces por semana, al final de lunes y viernes. Si quieres otros días, cámbialos en Editar.",
   ],
   cardioOptions: [

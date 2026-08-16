@@ -5,14 +5,15 @@ import { parsePeriodId, payPeriodFor } from "../shared/period.ts";
 import { isPlan, normalizePlan, type Plan } from "../shared/plan.ts";
 import { eachDate, weekDates } from "../shared/schedule.ts";
 import { seedPlan } from "../shared/seed.ts";
-import { coerceLoads, type TrainingLoads } from "../shared/training.ts";
+import { coerceLoads, mergeLoads, type TrainingLoads } from "../shared/training.ts";
 import { runAdvice } from "./advise.ts";
 import {
   clearSessionCookie,
   createSessionCookie,
   hashPassword,
-  hasValidSession,
+  parseSession,
   passwordsMatch,
+  shouldRefreshSession,
   verifyHashedPassword,
 } from "./auth.ts";
 import {
@@ -22,7 +23,8 @@ import {
   loginAllowed,
   noStoreApi,
   readJson,
-  rememberLoginFailure,
+  adviseAllowed,
+  writeAllowed,
   requireSameOrigin,
   securityHeaders,
 } from "./security.ts";
@@ -30,6 +32,7 @@ import {
 const PLAN_KEY = "current";
 const LOADS_KEY = "loads";
 const PASSWORD_KEY = "auth:password";
+const GEN_KEY = "auth:gen";
 const MAX_PASSWORD = 128;
 const MIN_PASSWORD = 8;
 
@@ -45,11 +48,7 @@ async function readPlan(env: Env): Promise<Plan> {
     await env.PLAN_KV.put(PLAN_KEY, JSON.stringify(seedPlan));
     return seedPlan;
   }
-  const plan = normalizePlan(stored);
-  if (JSON.stringify(stored) !== JSON.stringify(plan)) {
-    await env.PLAN_KV.put(PLAN_KEY, JSON.stringify(plan));
-  }
-  return plan;
+  return normalizePlan(stored);
 }
 
 async function readLoads(env: Env, weekCount: number): Promise<TrainingLoads> {
@@ -61,13 +60,28 @@ async function passwordAccepted(env: Env, given: string): Promise<boolean> {
   const stored = await env.PLAN_KV.get(PASSWORD_KEY);
   if (stored) return verifyHashedPassword(given, stored);
   const fallback = env.APP_PASSWORD;
-  return Boolean(fallback) && passwordsMatch(given, fallback);
+  return Boolean(fallback) && (await passwordsMatch(given, fallback));
+}
+
+async function sessionGeneration(env: Env): Promise<number> {
+  const raw = Number((await env.PLAN_KV.get(GEN_KEY)) ?? "0");
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0;
 }
 
 async function requireAuth(c: Context<{ Bindings: Env }>) {
   const secret = c.env.SESSION_SECRET;
-  if (!secret || !(await hasValidSession(c.req.raw, secret))) {
+  const session = secret ? await parseSession(c.req.raw, secret) : null;
+  const generation = await sessionGeneration(c.env);
+  if (!session || session.generation !== generation) {
+    c.header("Set-Cookie", clearSessionCookie(c.req.url));
     return c.json({ error: "No autorizado." }, 401);
+  }
+  const mutating = c.req.method !== "GET" && c.req.method !== "HEAD";
+  if (mutating && !(await writeAllowed(c.env.PLAN_KV, clientIp(c.req.raw)))) {
+    return c.json({ error: "Demasiadas escrituras. Espera un minuto." }, 429);
+  }
+  if (secret && shouldRefreshSession(session.exp)) {
+    c.header("Set-Cookie", await createSessionCookie(secret, c.req.url, generation));
   }
   return null;
 }
@@ -76,7 +90,8 @@ app.post("/api/login", async (c) => {
   const password = c.env.APP_PASSWORD;
   const secret = c.env.SESSION_SECRET;
   if (!password || !secret) {
-    return c.json({ error: "Faltan APP_PASSWORD o SESSION_SECRET." }, 500);
+    console.error(JSON.stringify({ message: "login missing secrets" }));
+    return c.json({ error: "Servicio no disponible." }, 500);
   }
 
   const ip = clientIp(c.req.raw);
@@ -87,12 +102,11 @@ app.post("/api/login", async (c) => {
   const body = (await readJson(c.req.raw, MAX_JSON_BYTES.login)) as { password?: unknown } | null;
   const given = typeof body?.password === "string" ? body.password.slice(0, MAX_PASSWORD) : "";
   if (!(await passwordAccepted(c.env, given))) {
-    await rememberLoginFailure(c.env.PLAN_KV, ip);
     return c.json({ error: "Contraseña incorrecta." }, 401);
   }
 
   await clearLoginFailures(c.env.PLAN_KV, ip);
-  c.header("Set-Cookie", await createSessionCookie(secret, c.req.url));
+  c.header("Set-Cookie", await createSessionCookie(secret, c.req.url, await sessionGeneration(c.env)));
   return c.json({ ok: true });
 });
 
@@ -120,15 +134,18 @@ app.post("/api/password", async (c) => {
   if (next === current) {
     return c.json({ error: "La nueva contraseña debe ser distinta." }, 400);
   }
+  const secret = c.env.SESSION_SECRET;
+  if (!secret) return c.json({ error: "Servicio no disponible." }, 500);
   await c.env.PLAN_KV.put(PASSWORD_KEY, await hashPassword(next));
+  const generation = (await sessionGeneration(c.env)) + 1;
+  await c.env.PLAN_KV.put(GEN_KEY, String(generation));
+  c.header("Set-Cookie", await createSessionCookie(secret, c.req.url, generation));
   return c.json({ ok: true });
 });
 
 app.get("/api/me", async (c) => {
-  const secret = c.env.SESSION_SECRET;
-  if (!secret || !(await hasValidSession(c.req.raw, secret))) {
-    return c.json({ ok: false }, 401);
-  }
+  const denied = await requireAuth(c);
+  if (denied) return denied;
   return c.json({ ok: true });
 });
 
@@ -143,7 +160,7 @@ app.put("/api/plan", async (c) => {
   if (denied) return denied;
 
   const body = await readJson(c.req.raw, MAX_JSON_BYTES.plan);
-  if (!isPlan(body)) {
+  if (body == null || !isPlan(body)) {
     return c.json({ error: "El plan no tiene un formato válido." }, 400);
   }
 
@@ -155,46 +172,25 @@ app.put("/api/plan", async (c) => {
   return c.json(next);
 });
 
-async function weekFlagCount(env: Env, date: string, flag: "zeroCalDrink" | "freeMeal"): Promise<number> {
+async function weekLogs(env: Env, date: string): Promise<DayLog[]> {
   const dates = weekDates(date);
-  const logs = await Promise.all(dates.map((day) => env.PLAN_KV.get(`log:${day}`, "json")));
-  return dates.reduce((count, day, index) => {
-    const log = coerceLog(logs[index], day);
-    return log && log[flag] ? count + 1 : count;
-  }, 0);
+  const stored = await Promise.all(dates.map((day) => env.PLAN_KV.get(`log:${day}`, "json")));
+  return dates.map((day, index) => coerceLog(stored[index], day) ?? emptyLog(day));
 }
 
-async function weekBreakCount(env: Env, date: string): Promise<number> {
-  const dates = weekDates(date);
-  const logs = await Promise.all(dates.map((day) => env.PLAN_KV.get(`log:${day}`, "json")));
-  return dates.reduce((count, day, index) => {
-    const log = coerceLog(logs[index], day);
-    return count + (log?.dietBreaks.length ?? 0);
-  }, 0);
-}
-
-async function weekSessionCount(env: Env, date: string, sessionId: string): Promise<number> {
-  const dates = weekDates(date);
-  const logs = await Promise.all(dates.map((day) => env.PLAN_KV.get(`log:${day}`, "json")));
-  return dates.reduce((count, day, index) => {
-    const log = coerceLog(logs[index], day);
-    return log?.doneSessionIds.includes(sessionId) ? count + 1 : count;
-  }, 0);
-}
-
-async function dayPayload(env: Env, date: string, log: DayLog, weekCount: number) {
-  const plan = await readPlan(env);
+async function dayPayload(env: Env, date: string, log: DayLog, plan: Plan) {
+  const [logs, loads] = await Promise.all([weekLogs(env, date), readLoads(env, plan.training.weekCount)]);
   const accessoryCounts: Record<string, number> = {};
   for (const session of plan.training.sessions.filter((item) => item.block === "accesorio")) {
-    accessoryCounts[session.id] = await weekSessionCount(env, date, session.id);
+    accessoryCounts[session.id] = logs.filter((item) => item.doneSessionIds.includes(session.id)).length;
   }
   return {
     log,
-    weekZeroCal: await weekFlagCount(env, date, "zeroCalDrink"),
-    weekFreeMeals: await weekFlagCount(env, date, "freeMeal"),
-    weekDietBreaks: await weekBreakCount(env, date),
+    weekZeroCal: logs.filter((item) => item.zeroCalDrink).length,
+    weekFreeMeals: logs.filter((item) => item.freeMeal).length,
+    weekDietBreaks: logs.reduce((sum, item) => sum + item.dietBreaks.length, 0),
     accessoryCounts,
-    loads: await readLoads(env, weekCount),
+    loads,
   };
 }
 
@@ -206,7 +202,7 @@ app.get("/api/day/:date", async (c) => {
   const plan = await readPlan(c.env);
   const stored = await c.env.PLAN_KV.get(`log:${date}`, "json");
   const log = coerceLog(stored, date) ?? emptyLog(date);
-  return c.json(await dayPayload(c.env, date, log, plan.training.weekCount));
+  return c.json(await dayPayload(c.env, date, log, plan));
 });
 
 app.put("/api/day/:date", async (c) => {
@@ -215,6 +211,9 @@ app.put("/api/day/:date", async (c) => {
   const date = c.req.param("date");
   if (!isDateKey(date)) return c.json({ error: "Fecha inválida." }, 400);
   const body = await readJson(c.req.raw, MAX_JSON_BYTES.day);
+  if (body == null) {
+    return c.json({ error: "El registro no es válido." }, 400);
+  }
   const parsed = coerceLog(body, date);
   if (!parsed) {
     return c.json({ error: "El registro no es válido." }, 400);
@@ -227,7 +226,7 @@ app.put("/api/day/:date", async (c) => {
   };
   await c.env.PLAN_KV.put(`log:${date}`, JSON.stringify(log));
   const plan = await readPlan(c.env);
-  return c.json(await dayPayload(c.env, date, log, plan.training.weekCount));
+  return c.json(await dayPayload(c.env, date, log, plan));
 });
 
 app.get("/api/range", async (c) => {
@@ -260,6 +259,9 @@ app.put("/api/pantry/:id", async (c) => {
   const period = parsePeriodId(c.req.param("id"));
   if (!period) return c.json({ error: "Quincena inválida." }, 400);
   const body = await readJson(c.req.raw, MAX_JSON_BYTES.pantry);
+  if (body == null) {
+    return c.json({ error: "La despensa no es válida." }, 400);
+  }
   const parsed = coercePantry(body, period.id);
   if (!parsed) {
     return c.json({ error: "La despensa no es válida." }, 400);
@@ -281,7 +283,12 @@ app.put("/api/loads", async (c) => {
   if (denied) return denied;
   const plan = await readPlan(c.env);
   const body = await readJson(c.req.raw, MAX_JSON_BYTES.loads);
-  const loads = coerceLoads(body, plan.training.weekCount);
+  if (body == null || typeof body !== "object") {
+    return c.json({ error: "Los pesos no son válidos." }, 400);
+  }
+  const incoming = coerceLoads(body, plan.training.weekCount);
+  const current = await readLoads(c.env, plan.training.weekCount);
+  const loads = mergeLoads(current, incoming);
   await c.env.PLAN_KV.put(LOADS_KEY, JSON.stringify(loads));
   return c.json(loads);
 });
@@ -289,30 +296,41 @@ app.put("/api/loads", async (c) => {
 app.post("/api/advise", async (c) => {
   const denied = await requireAuth(c);
   if (denied) return denied;
-  if (!c.env.AI) {
-    return c.json({ error: "Workers AI no está configurado." }, 503);
-  }
   const body = (await readJson(c.req.raw, MAX_JSON_BYTES.advise)) as {
     date?: unknown;
     question?: unknown;
   } | null;
-  const date = typeof body?.date === "string" ? body.date : "";
-  const question = (typeof body?.question === "string" ? body.question : "").trim().slice(0, 500);
+  if (body == null) return c.json({ error: "La consulta no es válida." }, 400);
+  const date = typeof body.date === "string" ? body.date : "";
+  const question = (typeof body.question === "string" ? body.question : "").trim().slice(0, 500);
   if (!isDateKey(date)) return c.json({ error: "Fecha inválida." }, 400);
   if (question.length < 4) return c.json({ error: "Escribe una pregunta un poco más clara." }, 400);
+  if (!(await adviseAllowed(c.env.PLAN_KV, clientIp(c.req.raw)))) {
+    return c.json({ error: "Demasiadas consultas a la IA. Espera unos minutos." }, 429);
+  }
+  if (!c.env.AI) {
+    return c.json({ error: "Workers AI no está configurado." }, 503);
+  }
 
-  const plan = await readPlan(c.env);
   const dates = weekDates(date);
-  const storedLogs = await Promise.all(dates.map((day) => c.env.PLAN_KV.get(`log:${day}`, "json")));
-  const logs = dates.map((day, index) => coerceLog(storedLogs[index], day) ?? emptyLog(day));
   const period = payPeriodFor(date);
-  const pantryStored = await c.env.PLAN_KV.get(`pantry:${period.id}`, "json");
+  const [plan, storedLogs, pantryStored] = await Promise.all([
+    readPlan(c.env),
+    Promise.all(dates.map((day) => c.env.PLAN_KV.get(`log:${day}`, "json"))),
+    c.env.PLAN_KV.get(`pantry:${period.id}`, "json"),
+  ]);
+  const logs = dates.map((day, index) => coerceLog(storedLogs[index], day) ?? emptyLog(day));
   const pantry = coercePantry(pantryStored, period.id);
 
   try {
     const text = await runAdvice(c.env.AI, { plan, date, question, logs, pantry, period });
     return c.json({ text });
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(JSON.stringify({ message: "advise failed", error: message }));
+    if (message === "timeout") {
+      return c.json({ error: "La IA tardó demasiado. Intenta de nuevo." }, 504);
+    }
     return c.json({ error: "No se pudo consultar a la IA." }, 502);
   }
 });

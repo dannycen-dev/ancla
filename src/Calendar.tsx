@@ -10,16 +10,17 @@ import {
   monthTitle,
   monthsBetween,
 } from "../shared/schedule.ts";
-import { loadRange } from "./api.ts";
+import { AuthError, loadRange } from "./api.ts";
 
 type CalendarProps = {
   plan: Plan;
   selectedDate: string;
   todayIso: string;
   onSelectDate: (date: string) => void;
+  onAuthLost: () => void;
 };
 
-export function Calendar({ plan, selectedDate, todayIso, onSelectDate }: CalendarProps) {
+export function Calendar({ plan, selectedDate, todayIso, onSelectDate, onAuthLost }: CalendarProps) {
   const today = todayIso;
   const [logs, setLogs] = useState<DayLog[]>([]);
   const rangeStart = plan.startedOn <= plan.consultOn ? plan.startedOn : plan.consultOn;
@@ -27,9 +28,13 @@ export function Calendar({ plan, selectedDate, todayIso, onSelectDate }: Calenda
 
   useEffect(() => {
     let cancelled = false;
-    void loadRange(rangeStart, rangeEnd).then((result) => {
-      if (!cancelled) setLogs(result);
-    });
+    void loadRange(rangeStart, rangeEnd)
+      .then((result) => {
+        if (!cancelled) setLogs(result);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof AuthError) onAuthLost();
+      });
     return () => {
       cancelled = true;
     };

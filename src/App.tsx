@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { isPlan, normalizePlan, type Plan } from "../shared/plan.ts";
-import { AuthError, checkSession, loadPlan, logout, savePlan } from "./api.ts";
+import { AuthError, flushPending, isLoggedOutLocally, loadPlan, logout, probeSession, savePlan } from "./api.ts";
 import { Editor } from "./Editor.tsx";
 import { Hub } from "./Hub.tsx";
 import { Login } from "./Login.tsx";
 import { PlanView } from "./PlanView.tsx";
 import { TrainingEditor } from "./TrainingEditor.tsx";
 import { TrainingView } from "./TrainingView.tsx";
-import { readCachedPlan } from "./offline.ts";
+import { readCachedPlan, subscribePending } from "./offline.ts";
 
 type Screen = "boot" | "login" | "hub" | "food" | "food-edit" | "gym" | "gym-edit";
 
@@ -16,28 +16,52 @@ export default function App() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [draft, setDraft] = useState<Plan | null>(null);
   const [fromCache, setFromCache] = useState(false);
+  const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    return subscribePending((count) => {
+      setPending(count > 0);
+      if (count === 0) {
+        void probeSession().then((status) => {
+          if (status === "ok") setFromCache(false);
+        });
+      }
+    });
+  }, []);
 
   async function hydrate() {
     setError("");
     try {
-      const online = await checkSession();
-      if (!online) {
-        const cached = await readCachedPlan();
-        if (isPlan(cached) && !navigator.onLine) {
-          setPlan(normalizePlan(cached));
-          setFromCache(true);
-          setScreen("hub");
-          return;
+      if (isLoggedOutLocally()) {
+        const status = await probeSession();
+        if (status === "ok") {
+          await logout();
         }
         setScreen("login");
         return;
       }
-      const result = await loadPlan();
-      setPlan(result.plan);
-      setFromCache(result.fromCache);
-      setScreen("hub");
+      const status = await probeSession();
+      if (status === "ok") {
+        await flushPending();
+        const result = await loadPlan();
+        setPlan(result.plan);
+        setFromCache(result.fromCache);
+        setScreen("hub");
+        return;
+      }
+      if (status === "offline") {
+        const cached = await readCachedPlan();
+        if (isPlan(cached)) {
+          setPlan(normalizePlan(cached));
+          setFromCache(true);
+          setScreen("hub");
+          void flushPending();
+          return;
+        }
+      }
+      setScreen("login");
     } catch (err) {
       if (err instanceof AuthError) {
         setScreen("login");
@@ -66,7 +90,6 @@ export default function App() {
       .then((saved) => {
         setPlan(saved);
         setDraft(null);
-        setFromCache(false);
         setScreen(nextScreen);
       })
       .catch((err: unknown) => {
@@ -80,9 +103,27 @@ export default function App() {
   }
 
   function handleLogout() {
+    const extra = pending
+      ? " Hay cambios en este teléfono que aún no se suben."
+      : fromCache
+        ? " Estás sin conexión: el plan se queda en el teléfono, pero pedirás contraseña al volver la red."
+        : "";
+    if (!window.confirm(`¿Salir de Ancla?${extra}`)) return;
     void logout().finally(() => {
       setPlan(null);
       setDraft(null);
+      setPending(false);
+      setFromCache(false);
+      setScreen("login");
+    });
+  }
+
+  function handleAuthLost() {
+    void logout().finally(() => {
+      setPlan(null);
+      setDraft(null);
+      setPending(false);
+      setFromCache(false);
       setScreen("login");
     });
   }
@@ -138,6 +179,7 @@ export default function App() {
       <PlanView
         plan={plan}
         fromCache={fromCache}
+        pending={pending}
         onHome={() => setScreen("hub")}
         onEdit={() => {
           setDraft(structuredClone(plan));
@@ -145,6 +187,7 @@ export default function App() {
           setScreen("food-edit");
         }}
         onLogout={handleLogout}
+        onAuthLost={handleAuthLost}
       />
     );
   }
@@ -154,6 +197,7 @@ export default function App() {
       <TrainingView
         plan={plan}
         fromCache={fromCache}
+        pending={pending}
         onHome={() => setScreen("hub")}
         onEdit={() => {
           setDraft(structuredClone(plan));
@@ -161,6 +205,7 @@ export default function App() {
           setScreen("gym-edit");
         }}
         onLogout={handleLogout}
+        onAuthLost={handleAuthLost}
       />
     );
   }
@@ -169,6 +214,7 @@ export default function App() {
     <Hub
       title={plan.title}
       fromCache={fromCache}
+      pending={pending}
       onFood={() => setScreen("food")}
       onGym={() => setScreen("gym")}
       onLogout={handleLogout}

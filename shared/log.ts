@@ -1,3 +1,5 @@
+import { localDateISO, parseISODate } from "./schedule.ts";
+
 export type DietBreak = {
   id: string;
   text: string;
@@ -70,10 +72,11 @@ export function coerceLog(value: unknown, date: string): DayLog | null {
     return null;
   }
   if (typeof log.waterHalves !== "number" || typeof log.extraWaterHalves !== "number") return null;
+  if (!Number.isFinite(log.waterHalves) || !Number.isFinite(log.extraWaterHalves)) return null;
   if (typeof log.zeroCalDrink !== "boolean") return null;
   return {
     date,
-    doneSlotIds: log.doneSlotIds,
+    doneSlotIds: coerceIdList(log.doneSlotIds),
     waterHalves: log.waterHalves,
     extraWaterHalves: log.extraWaterHalves,
     zeroCalDrink: log.zeroCalDrink,
@@ -99,6 +102,16 @@ function coerceStamp(value: unknown): string | null {
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
 }
 
+/** Safari iOS a veces manda HH:MM:SS o H:MM en input type=time. */
+export function normalizeClock(clock: string): string | null {
+  const match = clock.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 export function clockFromStamp(stamp: string | null): string {
   if (!stamp) return "";
   const date = new Date(stamp);
@@ -107,16 +120,28 @@ export function clockFromStamp(stamp: string | null): string {
 }
 
 export function stampFromDateAndClock(date: string, clock: string): string | null {
-  if (!isDateKey(date) || !/^\d{2}:\d{2}$/.test(clock)) return null;
-  const [hour, minute] = clock.split(":").map(Number);
-  const next = new Date(`${date}T00:00:00`);
-  next.setHours(hour, minute, 0, 0);
+  const normalized = normalizeClock(clock);
+  if (!isDateKey(date) || !normalized) return null;
+  const [hour, minute] = normalized.split(":").map(Number);
+  const next = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10)), hour, minute, 0, 0);
   return Number.isFinite(next.getTime()) ? next.toISOString() : null;
+}
+
+export function stampEndFromDateAndClock(
+  date: string,
+  clock: string,
+  startedAt: string | null,
+): string | null {
+  const stamp = stampFromDateAndClock(date, clock);
+  if (!stamp || !startedAt) return stamp;
+  if (Date.parse(stamp) > Date.parse(startedAt)) return stamp;
+  return new Date(Date.parse(stamp) + 86_400_000).toISOString();
 }
 
 export function gymDurationMinutes(startedAt: string | null, endedAt: string | null): number | null {
   if (!startedAt || !endedAt) return null;
-  const minutes = Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 60_000);
+  let minutes = Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 60_000);
+  if (minutes < 0 && minutes > -16 * 60) minutes += 24 * 60;
   return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
 }
 
@@ -133,5 +158,6 @@ export function isDayLog(value: unknown): value is DayLog {
 }
 
 export function isDateKey(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  return localDateISO(parseISODate(value)) === value;
 }

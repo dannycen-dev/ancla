@@ -48,7 +48,7 @@ export type TrainingSession = {
   exercises: TrainingExercise[];
 };
 
-export const TRAINING_CONTENT_VERSION = 7;
+export const TRAINING_CONTENT_VERSION = 8;
 
 export type TrainingPlan = {
   startedOn: string;
@@ -64,15 +64,49 @@ export type TrainingPlan = {
 
 export type LoadUnit = "kg" | "lb";
 
-export type ExerciseLoad = {
+export type SetLoad = {
   weight: string;
   unit: LoadUnit;
+};
+
+export type ExerciseLoad = {
   note: string;
+  sets: SetLoad[];
+};
+
+export type SetSlot = {
+  key: string;
+  label: string;
+  hint?: string;
+};
+
+export type LoadSnapshot = {
+  date: string;
+  exerciseId: string;
+  week: number;
+  note: string;
+  sets: SetLoad[];
+};
+
+export type RmEntry = {
+  id: string;
+  name: string;
+  date: string;
+  week: number;
+  weight: string;
+  reps: number;
+  unit: LoadUnit;
+  estimatedRm: number;
 };
 
 export type TrainingLoads = {
   byExercise: Record<string, ExerciseLoad[]>;
+  history: LoadSnapshot[];
+  rms: RmEntry[];
 };
+
+export const LOAD_HISTORY_CAP = 400;
+export const LOAD_RM_CAP = 80;
 
 export const BLOCK_LABEL: Record<TrainingBlock, string> = {
   fuerza: "Bloque 1 · Fuerza",
@@ -124,12 +158,20 @@ export function emptyRmNote(): RmNote {
   };
 }
 
+export function emptySetLoad(unit: LoadUnit = "kg"): SetLoad {
+  return { weight: "", unit };
+}
+
 export function emptyLoad(): ExerciseLoad {
-  return { weight: "", unit: "kg", note: "" };
+  return { note: "", sets: [] };
 }
 
 export function emptyLoads(): TrainingLoads {
-  return { byExercise: {} };
+  return { byExercise: {}, history: [], rms: [] };
+}
+
+export function loadHasData(load: ExerciseLoad): boolean {
+  return Boolean(load.note.trim()) || load.sets.some((set) => set.weight.trim());
 }
 
 function asMediaList(value: unknown): string[] {
@@ -241,19 +283,19 @@ export function normalizeTraining(plan: TrainingPlan, fallback: TrainingPlan): T
       Number.isFinite(source.weekCount) && source.weekCount > 0
         ? Math.min(12, Math.round(source.weekCount))
         : fallback.weekCount,
-    notes: source.notes.filter((note) => typeof note === "string").map((note) => note.slice(0, 500)),
-    systems: source.systems.map((item) => ({
+    notes: source.notes.filter((note) => typeof note === "string").map((note) => note.slice(0, 500)).slice(0, 40),
+    systems: source.systems.slice(0, 40).map((item) => ({
       ...item,
       name: item.name.slice(0, 80),
       example: item.example.slice(0, 160),
       body: item.body.slice(0, 800),
     })),
-    rmNotes: source.rmNotes.map((item) => ({
+    rmNotes: source.rmNotes.slice(0, 40).map((item) => ({
       ...item,
       title: item.title.slice(0, 80),
       body: item.body.slice(0, 500),
     })),
-    sessions: source.sessions.map((session) => ({
+    sessions: source.sessions.slice(0, 40).map((session) => ({
       ...session,
       id: session.id || crypto.randomUUID(),
       label: session.label.slice(0, 80),
@@ -264,7 +306,7 @@ export function normalizeTraining(plan: TrainingPlan, fallback: TrainingPlan): T
         typeof session.weeklyGoal === "number" && session.weeklyGoal > 0
           ? Math.min(7, Math.round(session.weeklyGoal))
           : null,
-      exercises: session.exercises.map((exercise) => ({
+      exercises: session.exercises.slice(0, 40).map((exercise) => ({
         ...exercise,
         name: exercise.name.slice(0, 120),
         prescription: exercise.prescription.slice(0, 240),
@@ -273,34 +315,153 @@ export function normalizeTraining(plan: TrainingPlan, fallback: TrainingPlan): T
     })),
     cardioOptions: source.cardioOptions
       .filter((item) => typeof item === "string")
-      .map((item) => item.slice(0, 160)),
+      .map((item) => item.slice(0, 160))
+      .slice(0, 20),
     cardioWeekdays: source.cardioWeekdays.filter((day) => day >= 0 && day <= 6),
   };
 }
 
 export function parseLoad(value: unknown): ExerciseLoad {
   if (value && typeof value === "object") {
-    const row = value as Partial<ExerciseLoad>;
-    return {
-      weight: sanitizeWeight(typeof row.weight === "string" ? row.weight : ""),
-      unit: row.unit === "lb" ? "lb" : "kg",
-      note: typeof row.note === "string" ? row.note.slice(0, 160) : "",
-    };
+    const row = value as { note?: unknown; sets?: unknown; weight?: unknown; unit?: unknown };
+    const note = typeof row.note === "string" ? row.note.slice(0, 160) : "";
+    if (Array.isArray(row.sets)) {
+      return { note, sets: row.sets.slice(0, 10).map(coerceSetLoad) };
+    }
+    const unit: LoadUnit = row.unit === "lb" ? "lb" : "kg";
+    const weight = sanitizeWeight(typeof row.weight === "string" ? row.weight : "");
+    return { note, sets: weight ? [{ weight, unit }] : [] };
   }
   if (typeof value !== "string") return emptyLoad();
   const trimmed = value.trim();
   const match = trimmed.match(/^(\d+(?:[.,]\d+)?)\s*(kg|kgs|kilo|kilos|lb|lbs|libra|libras)?$/i);
   if (match) {
     return {
-      weight: sanitizeWeight(match[1]),
-      unit: match[2] && /^lb/i.test(match[2]) ? "lb" : "kg",
       note: "",
+      sets: [
+        {
+          weight: sanitizeWeight(match[1]),
+          unit: match[2] && /^lb/i.test(match[2]) ? "lb" : "kg",
+        },
+      ],
     };
   }
   if (/^\d+(?:[.,]\d+)?$/.test(trimmed)) {
-    return { weight: sanitizeWeight(trimmed), unit: "kg", note: "" };
+    return { note: "", sets: [{ weight: sanitizeWeight(trimmed), unit: "kg" }] };
   }
-  return { weight: "", unit: "kg", note: trimmed.slice(0, 160) };
+  return { note: trimmed.slice(0, 160), sets: [] };
+}
+
+function coerceSetLoad(value: unknown): SetLoad {
+  if (value && typeof value === "object") {
+    const row = value as Partial<SetLoad>;
+    return {
+      weight: sanitizeWeight(typeof row.weight === "string" ? row.weight : ""),
+      unit: row.unit === "lb" ? "lb" : "kg",
+    };
+  }
+  if (typeof value === "string") {
+    const parsed = parseLoad(value);
+    return parsed.sets[0] ?? emptySetLoad();
+  }
+  return emptySetLoad();
+}
+
+export function setsForSlots(load: ExerciseLoad, count: number): SetLoad[] {
+  const size = Math.max(1, Math.min(10, count));
+  const sets = load.sets.slice(0, size).map(coerceSetLoad);
+  const unit = sets[0]?.unit ?? "kg";
+  while (sets.length < size) sets.push(emptySetLoad(unit));
+  return sets;
+}
+
+function peelTrailingParen(text: string): { body: string; note: string } {
+  const match = text.match(/^(.*)\s*\(([^)]+)\)\s*$/);
+  if (!match || !match[1].trim()) return { body: text.trim(), note: "" };
+  return { body: match[1].trim(), note: match[2].trim() };
+}
+
+function formatSetRest(rest: string): string {
+  const cleaned = rest.replace(/^serie\b/i, "").trim();
+  if (!cleaned) return "reps";
+  if (/^\d+$/.test(cleaned)) return `${cleaned} reps`;
+  return cleaned;
+}
+
+function isLongSetNote(note: string): boolean {
+  return note.length > 18 || /descanso|menos peso|segundos/i.test(note);
+}
+
+export function parseSetSlots(prescription: string): SetSlot[] {
+  const parts = splitTopLevel(prescription);
+  const slots: SetSlot[] = [];
+  let index = 1;
+  for (const part of parts) {
+    const drop = part.match(/^(\d+)\s*[xX]\s*\(([\d\s,]+)\)$/);
+    if (drop) {
+      const rounds = Math.min(6, Number(drop[1]) || 1);
+      const drops = drop[2]
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 4);
+      for (let round = 1; round <= rounds; round++) {
+        for (const reps of drops) {
+          slots.push({
+            key: `s${index}`,
+            label: rounds > 1 ? `Ronda ${round} · ${reps} reps` : `${reps} reps`,
+          });
+          index += 1;
+        }
+      }
+      continue;
+    }
+    const counted = part.match(/^(\d+)\s*[xX]\s*(.*)$/i);
+    if (counted) {
+      const count = Math.min(8, Math.max(1, Number(counted[1]) || 1));
+      if (count === 1) {
+        slots.push({ key: `s${index}`, label: part });
+        index += 1;
+      } else {
+        const peeled = peelTrailingParen(counted[2]);
+        const restLabel = formatSetRest(peeled.body);
+        const hint = peeled.note && isLongSetNote(peeled.note) ? peeled.note : "";
+        const shortNote = peeled.note && !hint ? peeled.note : "";
+        for (let set = 1; set <= count; set++) {
+          slots.push({
+            key: `s${index}`,
+            label: `Serie ${set}/${count} · ${restLabel}${shortNote ? ` · ${shortNote}` : ""}`,
+            hint: set === 1 && hint ? hint : undefined,
+          });
+          index += 1;
+        }
+      }
+      continue;
+    }
+    slots.push({ key: `s${index}`, label: part });
+    index += 1;
+  }
+  return slots.length > 0 ? slots.slice(0, 10) : [{ key: "s1", label: prescription || "Peso" }];
+}
+
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let buffer = "";
+  let depth = 0;
+  for (const char of text) {
+    if (char === "(") depth += 1;
+    if (char === ")" && depth > 0) depth -= 1;
+    if (char === "," && depth === 0) {
+      const piece = buffer.trim();
+      if (piece) parts.push(piece);
+      buffer = "";
+      continue;
+    }
+    buffer += char;
+  }
+  const piece = buffer.trim();
+  if (piece) parts.push(piece);
+  return parts;
 }
 
 function sanitizeWeight(value: string): string {
@@ -311,18 +472,109 @@ function sanitizeWeight(value: string): string {
   return joined.slice(0, 8);
 }
 
+function coerceSnapshot(value: unknown): LoadSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Partial<LoadSnapshot>;
+  if (typeof row.date !== "string" || !isDateKey(row.date)) return null;
+  if (typeof row.exerciseId !== "string" || !row.exerciseId || row.exerciseId.length > 80) return null;
+  const week = typeof row.week === "number" && Number.isFinite(row.week) ? Math.round(row.week) : 0;
+  if (week < 1 || week > 12) return null;
+  const load = parseLoad({ note: row.note, sets: row.sets });
+  return { date: row.date, exerciseId: row.exerciseId, week, note: load.note, sets: load.sets };
+}
+
+function coerceHistory(value: unknown): LoadSnapshot[] {
+  if (!Array.isArray(value)) return [];
+  const next: LoadSnapshot[] = [];
+  const indexByKey = new Map<string, number>();
+  for (const item of value) {
+    const snap = coerceSnapshot(item);
+    if (!snap) continue;
+    const key = `${snap.date}:${snap.exerciseId}`;
+    const existing = indexByKey.get(key);
+    if (existing != null) {
+      next[existing] = snap;
+      continue;
+    }
+    indexByKey.set(key, next.length);
+    next.push(snap);
+  }
+  return next.slice(-LOAD_HISTORY_CAP);
+}
+
+function coerceRmEntry(value: unknown): RmEntry | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Partial<RmEntry> & { estimatedRm?: unknown; reps?: unknown };
+  const id = typeof row.id === "string" && row.id.trim() ? row.id.trim().slice(0, 80) : "manual";
+  const name = typeof row.name === "string" ? row.name.trim().slice(0, 80) : "";
+  if (typeof row.date !== "string" || !isDateKey(row.date)) return null;
+  const week = typeof row.week === "number" && Number.isFinite(row.week) ? Math.round(row.week) : 0;
+  if (week < 1 || week > 12) return null;
+  const unit: LoadUnit = row.unit === "lb" ? "lb" : "kg";
+  const weight = sanitizeWeight(typeof row.weight === "string" ? row.weight : "");
+  const reps = typeof row.reps === "number" && Number.isInteger(row.reps) ? row.reps : 0;
+  const estimatedRm =
+    typeof row.estimatedRm === "number" && Number.isFinite(row.estimatedRm)
+      ? Math.round(row.estimatedRm)
+      : 0;
+  if (!weight || reps < 1 || reps > 21 || estimatedRm < 1 || estimatedRm > 2000) return null;
+  return { id, name, date: row.date, week, weight, reps, unit, estimatedRm };
+}
+
+function coerceRms(value: unknown): RmEntry[] {
+  if (!Array.isArray(value)) return [];
+  const next: RmEntry[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const entry = coerceRmEntry(item);
+    if (!entry) continue;
+    const key = `${entry.week}:${entry.id}:${entry.name.toLowerCase()}:${entry.date}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(entry);
+    if (next.length >= LOAD_RM_CAP) break;
+  }
+  return next;
+}
+
+function upsertHistory(
+  history: LoadSnapshot[],
+  snap: LoadSnapshot,
+): LoadSnapshot[] {
+  const key = `${snap.date}:${snap.exerciseId}`;
+  const next = history.filter((item) => `${item.date}:${item.exerciseId}` !== key);
+  if (loadHasData({ note: snap.note, sets: snap.sets })) next.push(snap);
+  return next.slice(-LOAD_HISTORY_CAP);
+}
+
 export function coerceLoads(value: unknown, weekCount = DEFAULT_TRAINING_WEEKS): TrainingLoads {
   if (value === null || typeof value !== "object") return emptyLoads();
-  const raw = (value as { byExercise?: unknown }).byExercise;
-  if (raw === null || typeof raw !== "object") return emptyLoads();
+  const row = value as { byExercise?: unknown; history?: unknown; rms?: unknown };
   const weeks = Math.max(1, Math.min(12, weekCount));
   const byExercise: Record<string, ExerciseLoad[]> = {};
-  for (const [id, row] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof id !== "string" || id.length > 80) continue;
-    const values = Array.isArray(row) ? row : [];
-    byExercise[id] = Array.from({ length: weeks }, (_, index) => parseLoad(values[index]));
+  if (row.byExercise && typeof row.byExercise === "object") {
+    for (const [id, weekRow] of Object.entries(row.byExercise as Record<string, unknown>).slice(0, 200)) {
+      if (typeof id !== "string" || id.length > 80) continue;
+      const values = Array.isArray(weekRow) ? weekRow : [];
+      byExercise[id] = Array.from({ length: weeks }, (_, index) => parseLoad(values[index]));
+    }
   }
-  return { byExercise };
+  return {
+    byExercise,
+    history: coerceHistory(row.history),
+    rms: coerceRms(row.rms),
+  };
+}
+
+export function mergeLoads(current: TrainingLoads, incoming: TrainingLoads): TrainingLoads {
+  return {
+    byExercise: { ...current.byExercise, ...incoming.byExercise },
+    history:
+      incoming.history.length === 0 && current.history.length > 0
+        ? current.history
+        : coerceHistory([...current.history, ...incoming.history]),
+    rms: incoming.rms.length === 0 && current.rms.length > 0 ? current.rms : coerceRms([...incoming.rms, ...current.rms]),
+  };
 }
 
 export function loadForWeek(loads: TrainingLoads, exerciseId: string, week: number): ExerciseLoad {
@@ -335,17 +587,55 @@ export function setLoad(
   week: number,
   value: ExerciseLoad,
   weekCount = DEFAULT_TRAINING_WEEKS,
+  date?: string,
 ): TrainingLoads {
   const weeks = Math.max(1, Math.min(12, weekCount));
   const current = loads.byExercise[exerciseId] ?? Array.from({ length: weeks }, () => emptyLoad());
   const next = current.slice(0, weeks);
   while (next.length < weeks) next.push(emptyLoad());
-  next[weekIndex(week)] = parseLoad(value);
+  const parsed = parseLoad(value);
+  next[weekIndex(week)] = parsed;
+  const history =
+    date && isDateKey(date)
+      ? upsertHistory(loads.history ?? [], {
+          date,
+          exerciseId,
+          week,
+          note: parsed.note,
+          sets: parsed.sets,
+        })
+      : (loads.history ?? []);
   return {
     byExercise: {
       ...loads.byExercise,
       [exerciseId]: next,
     },
+    history,
+    rms: loads.rms ?? [],
+  };
+}
+
+export function addRmEntry(loads: TrainingLoads, entry: RmEntry): TrainingLoads {
+  const parsed = coerceRmEntry(entry);
+  if (!parsed) {
+    return {
+      byExercise: loads.byExercise,
+      history: loads.history ?? [],
+      rms: loads.rms ?? [],
+    };
+  }
+  const rms = [
+    parsed,
+    ...(loads.rms ?? []).filter((item) => {
+      if (item.week !== parsed.week) return true;
+      if (parsed.id !== "manual") return item.id !== parsed.id;
+      return !(item.id === "manual" && item.date === parsed.date && item.name === parsed.name);
+    }),
+  ].slice(0, LOAD_RM_CAP);
+  return {
+    byExercise: loads.byExercise,
+    history: loads.history ?? [],
+    rms,
   };
 }
 

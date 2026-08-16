@@ -227,7 +227,6 @@ export function normalizePlan(plan: StoredPlan): Plan {
       : seedTraining;
   return {
     ...plan,
-    schedule,
     training,
     products: catalog.products,
     bundles: catalog.bundles,
@@ -237,11 +236,22 @@ export function normalizePlan(plan: StoredPlan): Plan {
       typeof plan.consultFeeMxn === "number" && Number.isFinite(plan.consultFeeMxn) && plan.consultFeeMxn >= 0
         ? plan.consultFeeMxn
         : DEFAULT_CONSULT_FEE,
-    recommendations: plan.recommendations.filter(
-      (item) =>
-        !MOVED_REC_IDS.has(item.id) &&
-        !/omega-3|probiót|3\.5 litros|comidas marcadas en verde|comidas libres/i.test(item.text),
-    ),
-    extras: plan.extras.filter((text) => !/cero calor|Clight/i.test(text)),
+    recommendations: plan.recommendations
+      .filter(
+        (item) =>
+          !MOVED_REC_IDS.has(item.id) &&
+          !/omega-3|probiót|3\.5 litros|comidas marcadas en verde|comidas libres/i.test(item.text),
+      )
+      .slice(0, 40),
+    extras: plan.extras.filter((text) => !/cero calor|Clight/i.test(text)).slice(0, 40),
+    goals: plan.goals.slice(0, 40),
+    meals: plan.meals.slice(0, 40).map((meal) => ({
+      ...meal,
+      options: meal.options.slice(0, 12).map((option) => ({
+        ...option,
+        items: option.items.slice(0, 40),
+      })),
+    })),
+    schedule: schedule.slice(0, 40),
   };
 }

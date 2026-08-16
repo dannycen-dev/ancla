@@ -19,14 +19,15 @@ import {
 import { formatDayLong } from "../shared/schedule.ts";
 import { dateInPeriod, payPeriodFor, periodTitle, shiftPeriod, type PayPeriod } from "../shared/period.ts";
 import { CONSULT_EXPENSE_ID, type Plan } from "../shared/plan.ts";
-import { loadPantry, savePantry } from "./api.ts";
+import { AuthError, loadPantry, savePantry } from "./api.ts";
 
 type PantryProps = {
   plan: Plan;
   todayIso: string;
+  onAuthLost: () => void;
 };
 
-export function Pantry({ plan, todayIso }: PantryProps) {
+export function Pantry({ plan, todayIso, onAuthLost }: PantryProps) {
   const [period, setPeriod] = useState<PayPeriod>(() => payPeriodFor(todayIso));
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const list = useMemo(() => buildGrocery(plan, period), [plan, period]);
@@ -45,6 +46,7 @@ export function Pantry({ plan, todayIso }: PantryProps) {
 
   useEffect(() => {
     let cancelled = false;
+    setCheckedIds([]);
     void loadPantry(period.id).then((state) => {
       if (!cancelled) setCheckedIds(state.checkedIds);
     });
@@ -55,7 +57,9 @@ export function Pantry({ plan, todayIso }: PantryProps) {
 
   function patchChecked(next: string[]) {
     setCheckedIds(next);
-    void savePantry({ periodId: period.id, checkedIds: next });
+    void savePantry({ periodId: period.id, checkedIds: next }).catch((err: unknown) => {
+      if (err instanceof AuthError) onAuthLost();
+    });
   }
 
   function toggle(id: string) {

@@ -8,7 +8,7 @@ const DAY_NAMES = [
   "Sábado",
 ] as const;
 
-const DAY_SHORT = ["D", "L", "M", "X", "J", "V", "S"] as const;
+const DAY_SHORT = ["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"] as const;
 
 /** Lunes = 0 … Domingo = 6, para rotar las 4 variaciones. */
 export function mondayIndex(jsDay: number): number {
@@ -59,6 +59,17 @@ export function localDateISO(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+/** La semana de gym corta el lunes a esta hora local, para incluir el RM del fin de semana. */
+export const TRAINING_WEEK_CUTOVER_HOUR = 1;
+
+export function trainingDateISO(now = new Date()): string {
+  const date = new Date(now.getTime());
+  if (date.getDay() === 1 && date.getHours() < TRAINING_WEEK_CUTOVER_HOUR) {
+    date.setDate(date.getDate() - 1);
+  }
+  return localDateISO(date);
 }
 
 export function dateForWeekday(jsDay: number, from = new Date()): string {

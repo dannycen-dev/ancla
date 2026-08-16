@@ -59,16 +59,17 @@ export function clientIp(request: Request): string {
 }
 
 export function isSameOrigin(request: Request): boolean {
-  const url = new URL(request.url);
+  const site = request.headers.get("Sec-Fetch-Site");
+  if (site === "cross-site") return false;
   const origin = request.headers.get("Origin");
-  if (origin) return origin === url.origin;
-  const referer = request.headers.get("Referer");
-  if (!referer) return true;
-  try {
-    return new URL(referer).origin === url.origin;
-  } catch {
-    return false;
+  if (origin) {
+    try {
+      return origin === new URL(request.url).origin;
+    } catch {
+      return false;
+    }
   }
+  return site === "same-origin" || site === "none";
 }
 
 export const requireSameOrigin: MiddlewareHandler = async (c, next) => {
@@ -83,10 +84,35 @@ export async function readJson(
   request: Request,
   maxBytes: number,
 ): Promise<unknown | null> {
-  const declared = Number(request.headers.get("content-length") ?? "0");
+  const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) return null;
-  const buffer = await request.arrayBuffer();
-  if (buffer.byteLength > maxBytes) return null;
+
+  const reader = request.body?.getReader();
+  if (!reader) return null;
+
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const buffer = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   try {
     return JSON.parse(new TextDecoder().decode(buffer)) as unknown;
   } catch {
@@ -95,20 +121,33 @@ export async function readJson(
 }
 
 export async function loginAllowed(kv: KVNamespace, ip: string): Promise<boolean> {
-  const count = Number((await kv.get(rateKey(ip))) ?? "0");
-  return count < LOGIN_MAX_ATTEMPTS;
-}
-
-export async function rememberLoginFailure(kv: KVNamespace, ip: string): Promise<void> {
-  const key = rateKey(ip);
-  const count = Number((await kv.get(key)) ?? "0") + 1;
-  await kv.put(key, String(count), { expirationTtl: LOGIN_WINDOW_SECONDS });
+  return takeRateSlot(kv, rateKey(ip, "login"), LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS);
 }
 
 export async function clearLoginFailures(kv: KVNamespace, ip: string): Promise<void> {
-  await kv.delete(rateKey(ip));
+  await kv.delete(rateKey(ip, "login"));
 }
 
-function rateKey(ip: string): string {
-  return `rl:login:${ip.slice(0, 64)}`;
+export async function adviseAllowed(kv: KVNamespace, ip: string): Promise<boolean> {
+  return takeRateSlot(kv, rateKey(ip, "advise"), 20, LOGIN_WINDOW_SECONDS);
+}
+
+export async function writeAllowed(kv: KVNamespace, ip: string): Promise<boolean> {
+  return takeRateSlot(kv, rateKey(ip, "write"), 180, 60);
+}
+
+async function takeRateSlot(
+  kv: KVNamespace,
+  key: string,
+  max: number,
+  windowSeconds: number,
+): Promise<boolean> {
+  const count = Number((await kv.get(key)) ?? "0");
+  if (!Number.isFinite(count) || count >= max) return false;
+  await kv.put(key, String(count + 1), { expirationTtl: windowSeconds });
+  return true;
+}
+
+function rateKey(ip: string, kind: string): string {
+  return `rl:${kind}:${ip.slice(0, 64)}`;
 }

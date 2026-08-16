@@ -9,10 +9,17 @@ import {
   cachePantry,
   cachePlan,
   clearOfflineData,
+  enqueueOutbox,
+  listOutbox,
+  outboxKey,
+  pendingCount,
   readCachedLog,
   readCachedLoads,
   readCachedPantry,
   readCachedPlan,
+  readOutboxItem,
+  removeOutbox,
+  type OutboxItem,
 } from "./offline.ts";
 
 export class AuthError extends Error {
@@ -22,36 +29,91 @@ export class AuthError extends Error {
   }
 }
 
+export type SessionStatus = "ok" | "unauth" | "offline";
+
 async function parseJson(response: Response): Promise<unknown> {
   return response.json().catch(() => null);
 }
 
+function isNetworkError(error: unknown): boolean {
+  return error instanceof TypeError || (error instanceof DOMException && error.name === "AbortError");
+}
+
+async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  return fetch(input, { credentials: "include", ...init });
+}
+
 export async function login(password: string): Promise<void> {
-  const response = await fetch("/api/login", {
+  const response = await apiFetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify({ password }),
   });
   if (!response.ok) {
     const body = (await parseJson(response)) as { error?: string } | null;
     throw new Error(body?.error ?? "No se pudo iniciar sesión.");
   }
+  clearLoggedOut();
 }
 
-export async function logout(): Promise<void> {
+const LOGOUT_FLAG = "ancla-logged-out";
+const RM_STORAGE_KEY = "ancla-rm";
+
+export function markLoggedOut(): void {
   try {
-    await fetch("/api/logout", { method: "POST", credentials: "include" });
-  } finally {
-    await clearOfflineData().catch(() => undefined);
+    localStorage.setItem(LOGOUT_FLAG, "1");
+  } catch {
+    /* Safari privado. */
+  }
+  try {
+    localStorage.removeItem(RM_STORAGE_KEY);
+  } catch {
+    /* ignore */
   }
 }
 
+export function clearLoggedOut(): void {
+  try {
+    localStorage.removeItem(LOGOUT_FLAG);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isLoggedOutLocally(): boolean {
+  try {
+    return localStorage.getItem(LOGOUT_FLAG) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function flushDraftsNow(): void {
+  window.dispatchEvent(new Event("ancla-flush-drafts"));
+}
+
+export async function logout(): Promise<void> {
+  markLoggedOut();
+  flushDraftsNow();
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  await flushPending().catch(() => undefined);
+  let serverOk = false;
+  try {
+    const response = await apiFetch("/api/logout", { method: "POST" });
+    serverOk = response.ok;
+  } catch {
+    /* Sin red la cookie sigue; la bandera local impide reentrar al volver la señal. */
+  }
+  if (!serverOk) return;
+  const remaining = await pendingCount();
+  if (remaining > 0) return;
+  await clearOfflineData().catch(() => undefined);
+}
+
 export async function changePassword(current: string, next: string): Promise<void> {
-  const response = await fetch("/api/password", {
+  const response = await apiFetch("/api/password", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify({ current, next }),
   });
   if (response.status === 401) {
@@ -67,18 +129,173 @@ export async function changePassword(current: string, next: string): Promise<voi
   }
 }
 
-export async function checkSession(): Promise<boolean> {
+export async function probeSession(): Promise<SessionStatus> {
   try {
-    const response = await fetch("/api/me", { credentials: "include" });
-    return response.ok;
+    const response = await apiFetch("/api/me");
+    if (response.ok) return "ok";
+    if (response.status === 401) return "unauth";
+    return "offline";
   } catch {
-    return false;
+    return "offline";
   }
 }
 
-export async function loadPlan(): Promise<{ plan: Plan; fromCache: boolean }> {
+export type DayPayload = {
+  log: DayLog;
+  weekZeroCal: number;
+  weekFreeMeals: number;
+  weekDietBreaks: number;
+  accessoryCounts: Record<string, number>;
+  loads: TrainingLoads;
+};
+
+function fallbackDay(log: DayLog, loads: TrainingLoads = emptyLoads()): DayPayload {
+  return {
+    log,
+    weekZeroCal: log.zeroCalDrink ? 1 : 0,
+    weekFreeMeals: log.freeMeal ? 1 : 0,
+    weekDietBreaks: log.dietBreaks.length,
+    accessoryCounts: {},
+    loads,
+  };
+}
+
+type DayBody = {
+  log?: unknown;
+  weekZeroCal?: number;
+  weekFreeMeals?: number;
+  weekDietBreaks?: number;
+  accessoryCounts?: Record<string, number>;
+  loads?: unknown;
+};
+
+function payloadFromBody(date: string, body: DayBody | null): DayPayload | null {
+  const log = body ? coerceLog(body.log, date) : null;
+  if (!log || !body) return null;
+  const loads = coerceLoads(body.loads);
+  return {
+    log,
+    weekZeroCal: body.weekZeroCal ?? 0,
+    weekFreeMeals: body.weekFreeMeals ?? 0,
+    weekDietBreaks: body.weekDietBreaks ?? log.dietBreaks.length,
+    accessoryCounts: body.accessoryCounts ?? {},
+    loads,
+  };
+}
+
+type UploadResult =
+  | { status: "ok"; day?: DayPayload; plan?: Plan; loads?: TrainingLoads; pantry?: PantryState }
+  | { status: "auth" }
+  | { status: "fail" };
+
+async function putJson(url: string, body: unknown): Promise<Response> {
+  return apiFetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+let flushChain: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(work: () => Promise<T>): Promise<T> {
+  const next = flushChain.then(work, work);
+  flushChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+async function uploadItem(item: OutboxItem): Promise<UploadResult> {
+  let response: Response;
   try {
-    const response = await fetch("/api/plan", { credentials: "include" });
+    switch (item.kind) {
+      case "plan":
+        response = await putJson("/api/plan", item.plan);
+        break;
+      case "loads":
+        response = await putJson("/api/loads", item.loads);
+        break;
+      case "pantry":
+        response = await putJson(`/api/pantry/${item.state.periodId}`, item.state);
+        break;
+      case "day":
+        response = await putJson(`/api/day/${item.log.date}`, item.log);
+        break;
+    }
+  } catch (error) {
+    if (isNetworkError(error)) return { status: "fail" };
+    throw error;
+  }
+  if (response.status === 401) return { status: "auth" };
+  if (!response.ok) return { status: "fail" };
+
+  const body: unknown = await parseJson(response);
+  if (item.kind === "plan" && isPlan(body)) {
+    const plan = normalizePlan(body);
+    await cachePlan(plan);
+    return { status: "ok", plan };
+  }
+  if (item.kind === "loads") {
+    const loads = coerceLoads(body);
+    await cacheLoads(loads);
+    return { status: "ok", loads };
+  }
+  if (item.kind === "pantry") {
+    const pantry = coercePantry(body, item.state.periodId) ?? item.state;
+    await cachePantry(pantry);
+    return { status: "ok", pantry };
+  }
+  if (item.kind !== "day") return { status: "ok" };
+  const day = payloadFromBody(item.log.date, body as DayBody | null) ?? fallbackDay(item.log, await readCachedLoads());
+  await cacheLog(day.log);
+  await cacheLoads(day.loads);
+  return { status: "ok", day };
+}
+
+async function uploadLatest(key: string): Promise<UploadResult> {
+  const item = await readOutboxItem(key);
+  if (!item) return { status: "ok" };
+  const snapshot = JSON.stringify(item);
+  const result = await uploadItem(item);
+  if (result.status !== "ok") return result;
+  const current = await readOutboxItem(key);
+  if (current && JSON.stringify(current) !== snapshot) {
+    return uploadLatest(key);
+  }
+  await removeOutbox(key);
+  return result;
+}
+
+export async function flushPending(): Promise<{ remaining: number; authLost: boolean }> {
+  return serialize(async () => {
+    const items = await listOutbox();
+    for (const item of items) {
+      const result = await uploadLatest(outboxKey(item));
+      if (result.status === "ok") continue;
+      if (result.status === "auth") return { remaining: await pendingCount(), authLost: true };
+      return { remaining: await pendingCount(), authLost: false };
+    }
+    return { remaining: 0, authLost: false };
+  });
+}
+
+async function rememberAndUpload(item: OutboxItem): Promise<UploadResult> {
+  await enqueueOutbox(item);
+  return serialize(() => uploadLatest(outboxKey(item)));
+}
+
+export async function loadPlan(): Promise<{ plan: Plan; fromCache: boolean }> {
+  const queued = await readOutboxItem("plan");
+  if (queued?.kind === "plan" && isPlan(queued.plan)) {
+    const plan = normalizePlan(queued.plan);
+    await cachePlan(plan);
+    void flushPending();
+    return { plan, fromCache: true };
+  }
+  try {
+    const response = await apiFetch("/api/plan");
     if (response.status === 401) throw new AuthError();
     if (!response.ok) throw new Error("No se pudo cargar el plan.");
     const body: unknown = await parseJson(response);
@@ -95,164 +312,105 @@ export async function loadPlan(): Promise<{ plan: Plan; fromCache: boolean }> {
 }
 
 export async function savePlan(plan: Plan): Promise<Plan> {
-  const response = await fetch("/api/plan", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(plan),
-  });
-  if (response.status === 401) throw new AuthError();
-  if (!response.ok) {
-    const body = (await parseJson(response)) as { error?: string } | null;
-    throw new Error(body?.error ?? "No se pudo guardar.");
-  }
-  const body: unknown = await parseJson(response);
-  if (!isPlan(body)) throw new Error("El plan guardado no es válido.");
-  const planSaved = normalizePlan(body);
-  await cachePlan(planSaved);
-  return planSaved;
+  const next = normalizePlan(plan);
+  await cachePlan(next);
+  const result = await rememberAndUpload({ kind: "plan", plan: next });
+  if (result.status === "auth") throw new AuthError();
+  if (result.status === "ok" && result.plan) return result.plan;
+  return next;
 }
 
-export type DayPayload = {
-  log: DayLog;
-  weekZeroCal: number;
-  weekFreeMeals: number;
-  weekDietBreaks: number;
-  accessoryCounts: Record<string, number>;
-  loads: TrainingLoads;
-};
-
-function fallbackDay(log: DayLog): DayPayload {
+async function preferQueuedDay(date: string, payload: DayPayload): Promise<DayPayload> {
+  const [queuedDay, queuedLoads] = await Promise.all([readOutboxItem(`day:${date}`), readOutboxItem("loads")]);
   return {
-    log,
-    weekZeroCal: log.zeroCalDrink ? 1 : 0,
-    weekFreeMeals: log.freeMeal ? 1 : 0,
-    weekDietBreaks: log.dietBreaks.length,
-    accessoryCounts: {},
-    loads: emptyLoads(),
+    ...payload,
+    log: queuedDay?.kind === "day" ? queuedDay.log : payload.log,
+    loads: queuedLoads?.kind === "loads" ? queuedLoads.loads : payload.loads,
   };
 }
 
 export async function loadDay(date: string): Promise<DayPayload> {
+  const queued = await readOutboxItem(`day:${date}`);
+  if (queued?.kind === "day") {
+    void flushPending();
+    const loadsItem = await readOutboxItem("loads");
+    const loads = loadsItem?.kind === "loads" ? loadsItem.loads : await readCachedLoads();
+    return fallbackDay(queued.log, loads ?? emptyLoads());
+  }
   try {
-    const response = await fetch(`/api/day/${date}`, { credentials: "include" });
+    const response = await apiFetch(`/api/day/${date}`);
     if (response.status === 401) throw new AuthError();
     if (!response.ok) throw new Error("No se pudo cargar el día.");
-    const body = (await parseJson(response)) as {
-      log?: unknown;
-      weekZeroCal?: number;
-      weekFreeMeals?: number;
-      weekDietBreaks?: number;
-      accessoryCounts?: Record<string, number>;
-      loads?: unknown;
-    } | null;
-    const log = body ? coerceLog(body.log, date) : null;
-    if (!log) throw new Error("El día recibido no es válido.");
-    await cacheLog(log);
-    const loads = coerceLoads(body?.loads);
-    await cacheLoads(loads);
-    return {
-      log,
-      weekZeroCal: body?.weekZeroCal ?? 0,
-      weekFreeMeals: body?.weekFreeMeals ?? 0,
-      weekDietBreaks: body?.weekDietBreaks ?? log.dietBreaks.length,
-      accessoryCounts: body?.accessoryCounts ?? {},
-      loads,
-    };
+    const body = (await parseJson(response)) as Parameters<typeof payloadFromBody>[1];
+    const payload = payloadFromBody(date, body);
+    if (!payload) throw new Error("El día recibido no es válido.");
+    const next = await preferQueuedDay(date, payload);
+    await cacheLog(next.log);
+    await cacheLoads(next.loads);
+    return next;
   } catch (error) {
     if (error instanceof AuthError) throw error;
     const cached = await readCachedLog(date);
-    if (cached) {
-      return {
-        ...fallbackDay(cached),
-        loads: await readCachedLoads(),
-      };
-    }
-    return fallbackDay(emptyLog(date));
+    const queuedLoads = await readOutboxItem("loads");
+    const loads = queuedLoads?.kind === "loads" ? queuedLoads.loads : await readCachedLoads();
+    if (cached) return fallbackDay(cached, loads ?? emptyLoads());
+    return fallbackDay(emptyLog(date), loads ?? emptyLoads());
   }
 }
 
 export async function saveDay(log: DayLog): Promise<DayPayload> {
   await cacheLog(log);
-  try {
-    const response = await fetch(`/api/day/${log.date}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(log),
-    });
-    if (response.status === 401) throw new AuthError();
-    if (!response.ok) throw new Error("No se pudo guardar el día.");
-    const body = (await parseJson(response)) as {
-      log?: unknown;
-      weekZeroCal?: number;
-      weekFreeMeals?: number;
-      weekDietBreaks?: number;
-      accessoryCounts?: Record<string, number>;
-      loads?: unknown;
-    } | null;
-    const saved = body ? coerceLog(body.log, log.date) : null;
-    if (!saved) {
-      return fallbackDay(log);
-    }
-    await cacheLog(saved);
-    const loads = coerceLoads(body?.loads);
-    await cacheLoads(loads);
-    return {
-      log: saved,
-      weekZeroCal: body?.weekZeroCal ?? 0,
-      weekFreeMeals: body?.weekFreeMeals ?? 0,
-      weekDietBreaks: body?.weekDietBreaks ?? saved.dietBreaks.length,
-      accessoryCounts: body?.accessoryCounts ?? {},
-      loads,
-    };
-  } catch (error) {
-    if (error instanceof AuthError) throw error;
-    return fallbackDay(log);
-  }
+  const result = await rememberAndUpload({ kind: "day", log });
+  if (result.status === "auth") throw new AuthError();
+  if (result.status === "ok" && result.day) return result.day;
+  return fallbackDay(log, await readCachedLoads());
 }
 
 export async function saveLoads(loads: TrainingLoads): Promise<TrainingLoads> {
   await cacheLoads(loads);
-  try {
-    const response = await fetch("/api/loads", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(loads),
-    });
-    if (response.status === 401) throw new AuthError();
-    if (!response.ok) throw new Error("No se pudieron guardar los pesos.");
-    const body: unknown = await parseJson(response);
-    const saved = coerceLoads(body);
-    await cacheLoads(saved);
-    return saved;
-  } catch (error) {
-    if (error instanceof AuthError) throw error;
-    return loads;
-  }
+  const result = await rememberAndUpload({ kind: "loads", loads });
+  if (result.status === "auth") throw new AuthError();
+  if (result.status === "ok" && result.loads) return result.loads;
+  return loads;
 }
 
 export async function loadRange(from: string, to: string): Promise<DayLog[]> {
   const dates = eachDate(from, to);
   try {
-    const response = await fetch(`/api/range?from=${from}&to=${to}`, { credentials: "include" });
+    const response = await apiFetch(`/api/range?from=${from}&to=${to}`);
     if (response.status === 401) throw new AuthError();
     if (!response.ok) throw new Error("No se pudo cargar el calendario.");
     const body = (await parseJson(response)) as { logs?: unknown } | null;
     const rawLogs = Array.isArray(body?.logs) ? body.logs : [];
-    const logs = dates.map((date, index) => coerceLog(rawLogs[index], date) ?? emptyLog(date));
+    const logs = await Promise.all(
+      dates.map(async (date, index) => {
+        const queued = await readOutboxItem(`day:${date}`);
+        if (queued?.kind === "day") return queued.log;
+        return coerceLog(rawLogs[index], date) ?? emptyLog(date);
+      }),
+    );
     await Promise.all(logs.map((log) => cacheLog(log)));
     return logs;
   } catch (error) {
     if (error instanceof AuthError) throw error;
-    return Promise.all(dates.map(async (date) => (await readCachedLog(date)) ?? emptyLog(date)));
+    return Promise.all(
+      dates.map(async (date) => {
+        const queued = await readOutboxItem(`day:${date}`);
+        if (queued?.kind === "day") return queued.log;
+        return (await readCachedLog(date)) ?? emptyLog(date);
+      }),
+    );
   }
 }
 
 export async function loadPantry(periodId: string): Promise<PantryState> {
+  const queued = await readOutboxItem(`pantry:${periodId}`);
+  if (queued?.kind === "pantry") {
+    void flushPending();
+    return queued.state;
+  }
   try {
-    const response = await fetch(`/api/pantry/${periodId}`, { credentials: "include" });
+    const response = await apiFetch(`/api/pantry/${periodId}`);
     if (response.status === 401) throw new AuthError();
     if (!response.ok) throw new Error("No se pudo cargar la despensa.");
     const body: unknown = await parseJson(response);
@@ -268,33 +426,23 @@ export async function loadPantry(periodId: string): Promise<PantryState> {
 
 export async function savePantry(state: PantryState): Promise<PantryState> {
   await cachePantry(state);
-  try {
-    const response = await fetch(`/api/pantry/${state.periodId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(state),
-    });
-    if (response.status === 401) throw new AuthError();
-    if (!response.ok) throw new Error("No se pudo guardar la despensa.");
-    const body: unknown = await parseJson(response);
-    const saved = coercePantry(body, state.periodId);
-    if (!saved) return state;
-    await cachePantry(saved);
-    return saved;
-  } catch (error) {
-    if (error instanceof AuthError) throw error;
-    return state;
-  }
+  const result = await rememberAndUpload({ kind: "pantry", state });
+  if (result.status === "auth") throw new AuthError();
+  if (result.status === "ok" && result.pantry) return result.pantry;
+  return state;
 }
 
 export async function askAdvice(date: string, question: string): Promise<string> {
-  const response = await fetch("/api/advise", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ date, question }),
-  });
+  let response: Response;
+  try {
+    response = await apiFetch("/api/advise", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date, question }),
+    });
+  } catch {
+    throw new Error("Sin conexión. La IA necesita red.");
+  }
   if (response.status === 401) throw new AuthError();
   const body = (await parseJson(response)) as { text?: string; error?: string } | null;
   if (!response.ok) {

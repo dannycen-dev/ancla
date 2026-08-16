@@ -53,12 +53,11 @@ export function TrainingEditor({ plan, busy, error, onChange, onSave, onCancel }
         <label>
           Semanas del bloque
           <input
-            type="number"
-            min={1}
-            max={12}
+            inputMode="numeric"
+            enterKeyHint="done"
             value={training.weekCount}
             onChange={(event) =>
-              patch({ ...training, weekCount: Math.max(1, Math.min(12, Number(event.target.value) || 1)) })
+              patch({ ...training, weekCount: Math.max(1, Math.min(12, Number(event.target.value.replace(/\D/g, "")) || 1)) })
             }
           />
         </label>
@@ -166,13 +165,12 @@ export function TrainingEditor({ plan, busy, error, onChange, onSave, onCancel }
               }}
             />
             <input
-              type="number"
-              min={0}
-              max={100}
+              inputMode="numeric"
+              enterKeyHint="done"
               value={item.percent}
               onChange={(event) => {
                 const rmNotes = training.rmNotes.map((row, i) =>
-                  i === index ? { ...row, percent: Number(event.target.value) || 0 } : row,
+                  i === index ? { ...row, percent: Math.max(0, Math.min(100, Number(event.target.value.replace(/\D/g, "")) || 0)) } : row,
                 );
                 patch({ ...training, rmNotes });
               }}
@@ -285,14 +283,13 @@ function SessionFields({
         <label>
           Meta semanal (vacío = el día completo)
           <input
-            type="number"
-            min={0}
-            max={7}
+            inputMode="numeric"
+            enterKeyHint="done"
             value={session.weeklyGoal ?? ""}
             onChange={(event) =>
               onChange({
                 ...session,
-                weeklyGoal: event.target.value === "" ? null : Math.max(1, Number(event.target.value) || 1),
+                weeklyGoal: event.target.value === "" ? null : Math.max(1, Number(event.target.value.replace(/\D/g, "")) || 1),
               })
             }
           />
