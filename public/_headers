@@ -14,6 +14,9 @@
 /actualizar.html
   Cache-Control: no-cache
 
+/actualizar
+  Cache-Control: no-cache
+
 /sw.js
   Cache-Control: no-cache
 

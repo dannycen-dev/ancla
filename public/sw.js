@@ -9,6 +9,10 @@ function isAppShell(url) {
   return url.pathname === "/" || url.pathname === "/index.html";
 }
 
+function isBustPage(url) {
+  return url.pathname === "/actualizar.html" || url.pathname === "/actualizar";
+}
+
 async function precacheShell() {
   const cache = await caches.open(CACHE);
   await cache.addAll(PRECACHE);
@@ -56,7 +60,7 @@ self.addEventListener("message", (event) => {
 
 function shouldCache(url) {
   if (url.pathname.startsWith("/api/")) return false;
-  if (url.pathname === "/actualizar.html") return false;
+  if (isBustPage(url)) return false;
   if (url.pathname.startsWith("/assets/")) return true;
   return (
     isAppShell(url) ||
@@ -81,7 +85,7 @@ self.addEventListener("fetch", (event) => {
 
   const hashed = url.pathname.startsWith("/assets/");
   const navigate = request.mode === "navigate";
-  const bustPage = url.pathname === "/actualizar.html";
+  const bustPage = isBustPage(url);
 
   event.respondWith(
     (async () => {
