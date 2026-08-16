@@ -1,51 +1,30 @@
 {
-  "name": "ancla",
+  "name": "anclav3",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n api,web -c green,cyan \"tsx server/dev.ts\" \"vite --host 127.0.0.1 --port 5174\"",
-    "dev:api": "tsx server/dev.ts",
-    "dev:web": "vite --host 127.0.0.1 --port 5174",
+    "dev": "vite",
     "build": "tsc -b && vite build",
-    "start": "NODE_ENV=production tsx server/index.ts",
-    "start:node": "NODE_ENV=production node --import tsx server/index.ts",
-    "seed": "tsx scripts/seed-check.ts",
-    "audit": "tsx scripts/audit-public.ts",
     "lint": "oxlint",
-    "preview": "vite preview",
-    "test": "playwright test",
-    "test:login": "playwright test tests/login.spec.ts"
+    "preview": "npm run build && vite preview",
+    "deploy": "npm run build && wrangler deploy",
+    "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "@hono/node-server": "^2.0.10",
-    "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.11.1",
-    "cookie": "^2.0.1",
-    "date-fns": "^4.4.0",
-    "hono": "^4.12.31",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "zod": "^4.4.3"
+    "hono": "^4.13.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/cookie": "^0.6.0",
-    "@types/node": "^24.13.2",
+    "@cloudflare/vite-plugin": "^1.52.1",
+    "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
-    "concurrently": "^10.0.3",
-    "oxlint": "^1.71.0",
-    "playwright": "^1.61.1",
-    "tsx": "^4.23.1",
+    "@vitejs/plugin-react": "^6.0.4",
+    "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
-    "vite": "^8.1.1"
-  },
-  "allowScripts": {
-    "better-sqlite3@12.11.1": true,
-    "esbuild@0.28.1": true
+    "vite": "^8.2.0",
+    "wrangler": "^4.123.0"
   }
 }

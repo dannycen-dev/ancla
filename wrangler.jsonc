@@ -1,0 +1,32 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "anclav3",
+	"main": "worker/index.ts",
+	"account_id": "9189b4512d081db31f8c9f8a201271c4",
+	"compatibility_date": "2026-08-16",
+	"compatibility_flags": ["nodejs_compat"],
+	"assets": {
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/api/*"]
+	},
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	},
+	"workers_dev": true,
+	"upload_source_maps": true,
+	"kv_namespaces": [
+		{
+			"binding": "PLAN_KV",
+			"id": "8c9624c96eb04a81a62349e93f6b5468"
+		}
+	],
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	}
+}

@@ -1,0 +1,2 @@
+APP_PASSWORD=cambia-esta-contraseña
+SESSION_SECRET=genera-un-secreto-largo
