@@ -120,18 +120,13 @@ app.post("/api/password", async (c) => {
   if (denied) return denied;
 
   const body = (await readJson(c.req.raw, MAX_JSON_BYTES.login)) as {
-    current?: unknown;
     next?: unknown;
   } | null;
-  const current = typeof body?.current === "string" ? body.current.slice(0, MAX_PASSWORD) : "";
   const next = typeof body?.next === "string" ? body.next.slice(0, MAX_PASSWORD) : "";
-  if (!(await passwordAccepted(c.env, current))) {
-    return c.json({ error: "La contraseña actual no coincide." }, 401);
-  }
   if (next.length < MIN_PASSWORD) {
     return c.json({ error: `La nueva contraseña debe tener al menos ${MIN_PASSWORD} caracteres.` }, 400);
   }
-  if (next === current) {
+  if (await passwordAccepted(c.env, next)) {
     return c.json({ error: "La nueva contraseña debe ser distinta." }, 400);
   }
   const secret = c.env.SESSION_SECRET;

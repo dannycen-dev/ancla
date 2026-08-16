@@ -1,8 +1,12 @@
-const CACHE = "ancla-shell-v7";
+const CACHE = "ancla-shell-v8";
 const PRECACHE = ["/", "/manifest.webmanifest", "/favicon.svg", "/apple-touch-icon.png"];
 
 function assetUrlsFromHtml(html) {
   return [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
+}
+
+function isAppShell(url) {
+  return url.pathname === "/" || url.pathname === "/index.html";
 }
 
 async function precacheShell() {
@@ -15,7 +19,7 @@ async function precacheShell() {
     const html = await index.text();
     await Promise.all(
       assetUrlsFromHtml(html).map(async (url) => {
-        const response = await fetch(url);
+        const response = await fetch(url, { cache: "reload" });
         if (response.ok) await cache.put(url, response);
       }),
     );
@@ -37,12 +41,25 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data !== "bust") return;
+  event.waitUntil(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+      await self.registration.unregister();
+      const clients = await self.clients.matchAll({ type: "window" });
+      await Promise.all(clients.map((client) => client.navigate(client.url)));
+    })(),
+  );
+});
+
 function shouldCache(url) {
   if (url.pathname.startsWith("/api/")) return false;
+  if (url.pathname === "/actualizar.html") return false;
   if (url.pathname.startsWith("/assets/")) return true;
   return (
-    url.pathname === "/" ||
-    url.pathname === "/index.html" ||
+    isAppShell(url) ||
     url.pathname.endsWith(".webmanifest") ||
     url.pathname.endsWith(".png") ||
     url.pathname.endsWith(".svg") ||
@@ -64,9 +81,13 @@ self.addEventListener("fetch", (event) => {
 
   const hashed = url.pathname.startsWith("/assets/");
   const navigate = request.mode === "navigate";
+  const bustPage = url.pathname === "/actualizar.html";
 
   event.respondWith(
     (async () => {
+      if (bustPage) {
+        return fetch(request, { cache: "reload" });
+      }
       if (hashed) {
         const cached = await caches.match(request);
         if (cached) return cached;
@@ -74,17 +95,17 @@ self.addEventListener("fetch", (event) => {
       if (navigate) {
         const cached = (await caches.match(request)) || (await caches.match("/"));
         try {
-          const fresh = await fetch(request);
-          if (fresh.ok) {
+          const fresh = await fetch(request, { cache: "reload" });
+          if (fresh.ok && isAppShell(url)) {
             const cache = await caches.open(CACHE);
             const copy = fresh.clone();
             const html = await copy.text();
             await cache.put("/", fresh.clone());
             await cache.put(request, fresh.clone());
             await Promise.all(
-              assetUrlsFromHtml(html).map(async (url) => {
-                const asset = await fetch(url);
-                if (asset.ok) await cache.put(url, asset);
+              assetUrlsFromHtml(html).map(async (assetUrl) => {
+                const asset = await fetch(assetUrl, { cache: "reload" });
+                if (asset.ok) await cache.put(assetUrl, asset);
               }),
             );
           }

@@ -175,4 +175,27 @@ test.describe("API", () => {
     expect(body.history.length).toBeGreaterThan(0);
     expect(body.rms.length).toBeGreaterThan(0);
   });
+
+  test("cambiar contraseña exige sesión", async ({ request }) => {
+    const response = await request.post("/api/password", {
+      data: { next: "nueva-clave-ancla" },
+    });
+    expect(response.status()).toBe(401);
+  });
+
+  test("nueva contraseña corta se rechaza", async ({ request }) => {
+    await loginApi(request);
+    const response = await request.post("/api/password", {
+      data: { next: "corta" },
+    });
+    expect(response.status()).toBe(400);
+  });
+
+  test("la misma contraseña se rechaza", async ({ request }) => {
+    await loginApi(request);
+    const response = await request.post("/api/password", {
+      data: { next: requirePassword() },
+    });
+    expect(response.status()).toBe(400);
+  });
 });

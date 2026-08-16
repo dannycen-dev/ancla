@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AuthError, changePassword } from "./api.ts";
+import { RefreshAppButton } from "./RefreshAppButton.tsx";
 import { SyncBanner } from "./SyncBanner.tsx";
 
 type HubProps = {
@@ -26,6 +27,7 @@ export function Hub({ title, fromCache, pending, onFood, onGym, onLogout }: HubP
           <button type="button" className="ghost" onClick={() => setShowPassword((value) => !value)}>
             Contraseña
           </button>
+          <RefreshAppButton />
           <button type="button" className="ghost" onClick={onLogout}>
             Salir
           </button>
@@ -63,7 +65,6 @@ function PasswordForm({ onCancel, onAuthLost }: { onCancel: () => void; onAuthLo
         event.preventDefault();
         const form = event.currentTarget;
         const data = new FormData(form);
-        const current = String(data.get("current") ?? "");
         const next = String(data.get("next") ?? "");
         const confirm = String(data.get("confirm") ?? "");
         setError("");
@@ -73,7 +74,7 @@ function PasswordForm({ onCancel, onAuthLost }: { onCancel: () => void; onAuthLo
           return;
         }
         setBusy(true);
-        void changePassword(current, next)
+        void changePassword(next)
           .then(() => {
             setOk(true);
             form.reset();
@@ -89,10 +90,6 @@ function PasswordForm({ onCancel, onAuthLost }: { onCancel: () => void; onAuthLo
       }}
     >
       <h2>Nueva contraseña</h2>
-      <label>
-        Contraseña actual
-        <input name="current" type="password" autoComplete="current-password" required />
-      </label>
       <label>
         Nueva contraseña
         <input name="next" type="password" autoComplete="new-password" minLength={8} required />

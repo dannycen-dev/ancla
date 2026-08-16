@@ -6,6 +6,12 @@ test.describe("iPhone Safari", () => {
     await loginPage(page);
 
     await expect(page.getByRole("button", { name: /Plan alimenticio/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Recargar app" })).toBeVisible();
+    await page.getByRole("button", { name: "Contraseña" }).click();
+    await expect(page.getByLabel(/^Nueva contraseña$/i)).toBeVisible();
+    await expect(page.getByLabel(/Confirmar nueva/i)).toBeVisible();
+    await expect(page.getByLabel(/Contraseña actual/i)).toHaveCount(0);
+    await page.getByRole("button", { name: "Cerrar" }).click();
     await page.getByRole("button", { name: /Plan de entrenamiento/i }).click();
 
     await expect(page.getByRole("button", { name: "Hoy", exact: true })).toBeVisible();
@@ -90,5 +96,11 @@ test.describe("iPhone Safari", () => {
     await page.getByRole("button", { name: /Plan de entrenamiento/i }).click();
     await page.getByRole("button", { name: "RM", exact: true }).click();
     await expect(page.getByRole("heading", { name: /Repetición máxima \(90 kg\)/i })).toBeVisible();
+  });
+
+  test("actualizar.html recarga el inicio", async ({ page }) => {
+    await page.goto("/actualizar.html");
+    await expect(page.getByRole("heading", { name: /Tu plan, a la mano/i })).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
   });
 });

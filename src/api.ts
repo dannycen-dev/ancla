@@ -129,19 +129,13 @@ export async function logout(): Promise<void> {
   await clearOfflineData().catch(() => undefined);
 }
 
-export async function changePassword(current: string, next: string): Promise<void> {
+export async function changePassword(next: string): Promise<void> {
   const response = await apiFetch("/api/password", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ current, next }),
+    body: JSON.stringify({ next }),
   });
-  if (response.status === 401) {
-    const body = (await parseJson(response)) as { error?: string } | null;
-    if (body?.error === "La contraseña actual no coincide.") {
-      throw new Error(body.error);
-    }
-    throw new AuthError();
-  }
+  if (response.status === 401) throw new AuthError();
   if (!response.ok) {
     const body = (await parseJson(response)) as { error?: string } | null;
     throw new Error(body?.error ?? "No se pudo cambiar la contraseña.");

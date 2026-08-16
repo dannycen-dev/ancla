@@ -10,6 +10,10 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
+if (new URLSearchParams(window.location.search).has("fresh")) {
+  window.history.replaceState(null, "", window.location.pathname);
+}
+
 function kickSync() {
   void flushPending();
 }

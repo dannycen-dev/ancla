@@ -31,6 +31,7 @@ import { AuthError, loadDay, registerDraftFlush, saveDay } from "./api.ts";
 import { Calendar } from "./Calendar.tsx";
 import { Coach } from "./Coach.tsx";
 import { Pantry } from "./Pantry.tsx";
+import { RefreshAppButton } from "./RefreshAppButton.tsx";
 import { SyncBanner } from "./SyncBanner.tsx";
 import { useNow } from "./useNow.ts";
 
@@ -192,6 +193,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
           <button type="button" className="ghost" onClick={onEdit}>
             Editar
           </button>
+          <RefreshAppButton />
           <button type="button" className="ghost" onClick={onLogout}>
             Salir
           </button>

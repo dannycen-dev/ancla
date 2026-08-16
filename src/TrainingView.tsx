@@ -40,6 +40,7 @@ import {
 import { parseWeight } from "../shared/rm.ts";
 import { coachSets } from "../shared/setCoach.ts";
 import { AuthError, loadDay, registerDraftFlush, saveDay, saveLoads } from "./api.ts";
+import { RefreshAppButton } from "./RefreshAppButton.tsx";
 import { RmCalculator } from "./RmCalculator.tsx";
 import { SetTimer } from "./SetTimer.tsx";
 import { SyncBanner } from "./SyncBanner.tsx";
@@ -255,6 +256,7 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
           <button type="button" className="ghost" onClick={onEdit}>
             Editar
           </button>
+          <RefreshAppButton />
           <button type="button" className="ghost" onClick={onLogout}>
             Salir
           </button>
