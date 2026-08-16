@@ -47,9 +47,13 @@ export function Pantry({ plan, todayIso, onAuthLost }: PantryProps) {
   useEffect(() => {
     let cancelled = false;
     setCheckedIds([]);
-    void loadPantry(period.id).then((state) => {
-      if (!cancelled) setCheckedIds(state.checkedIds);
-    });
+    void loadPantry(period.id)
+      .then((state) => {
+        if (!cancelled) setCheckedIds(state.checkedIds);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof AuthError) onAuthLost();
+      });
     return () => {
       cancelled = true;
     };

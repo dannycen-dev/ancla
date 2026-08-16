@@ -23,6 +23,7 @@ export function Login({ onLoggedIn }: LoginProps) {
       } else {
         setError(err instanceof Error ? err.message : "No se pudo iniciar sesión.");
       }
+    } finally {
       setBusy(false);
     }
   }
@@ -38,6 +39,19 @@ export function Login({ onLoggedIn }: LoginProps) {
           contraseña otra vez.
         </p>
         <form autoComplete="on" onSubmit={(event) => void handleSubmit(event)}>
+          <label className="sr-only" htmlFor="username">
+            Usuario
+          </label>
+          <input
+            id="username"
+            name="username"
+            type="text"
+            autoComplete="username"
+            defaultValue="ancla"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
+          />
           <label htmlFor="password">Contraseña</label>
           <input
             id="password"

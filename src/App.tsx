@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { isPlan, normalizePlan, type Plan } from "../shared/plan.ts";
-import { AuthError, flushPending, isLoggedOutLocally, loadPlan, logout, probeSession, savePlan } from "./api.ts";
+import { AuthError, flushPending, isLoggedOutLocally, loadPlan, logout, probeSession, registerDraftFlush, savePlan } from "./api.ts";
 import { Editor } from "./Editor.tsx";
 import { Hub } from "./Hub.tsx";
 import { Login } from "./Login.tsx";
@@ -30,6 +30,29 @@ export default function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    function clearCacheFlag() {
+      void probeSession().then((status) => {
+        if (status === "ok") setFromCache(false);
+      });
+    }
+    window.addEventListener("online", clearCacheFlag);
+    window.addEventListener("pageshow", clearCacheFlag);
+    return () => {
+      window.removeEventListener("online", clearCacheFlag);
+      window.removeEventListener("pageshow", clearCacheFlag);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!draft) return;
+    return registerDraftFlush(() =>
+      savePlan(draft)
+        .then(setPlan)
+        .catch(() => undefined),
+    );
+  }, [draft]);
 
   async function hydrate() {
     setError("");

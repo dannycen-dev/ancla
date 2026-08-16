@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AuthError, askAdvice } from "./api.ts";
 
 const PROMPTS = [
@@ -19,18 +19,7 @@ export function Coach({ date, onAuthLost }: CoachProps) {
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [offline, setOffline] = useState(() => !navigator.onLine);
-
-  useEffect(() => {
-    const on = () => setOffline(false);
-    const off = () => setOffline(true);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
-    return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
-    };
-  }, []);
+  const [offline, setOffline] = useState(false);
 
   async function ask(text: string) {
     const next = text.trim();
@@ -46,6 +35,9 @@ export function Coach({ date, onAuthLost }: CoachProps) {
         onAuthLost();
         return;
       }
+      if (err instanceof TypeError || (err instanceof Error && /conexión|red/i.test(err.message))) {
+        setOffline(true);
+      }
       setError(err instanceof Error ? err.message : "No se pudo consultar a la IA.");
     } finally {
       setBusy(false);
@@ -57,7 +49,7 @@ export function Coach({ date, onAuthLost }: CoachProps) {
       <p className="eyebrow">Workers AI</p>
       <h1>Recomendaciones</h1>
       <p className="lede">
-        Pregunta con el menú, el gym del día, el avance y la despensa. No sustituye al nutriólogo: es un empujón
+        Pregunta con el menú, el gym y la despensa de {date}. No sustituye al nutriólogo: es un empujón
         para acomodar el día.
       </p>
       {offline ? (

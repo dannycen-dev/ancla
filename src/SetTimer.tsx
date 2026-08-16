@@ -45,14 +45,14 @@ export function SetTimer({ timer }: { timer: SlotTimer }) {
   const wakeRef = useRef<WakeLockSentinel | null>(null);
 
   useEffect(() => {
+    if (running) return;
     setLeftMs(seconds * 1000);
-    setRunning(false);
     setDone(false);
     endAt.current = null;
     finishedRef.current = false;
     void wakeRef.current?.release();
     wakeRef.current = null;
-  }, [seconds]);
+  }, [seconds, running]);
 
   async function lockScreen() {
     try {
@@ -74,7 +74,12 @@ export function SetTimer({ timer }: { timer: SlotTimer }) {
     setDone(true);
     endAt.current = null;
     unlockScreen();
-    playBeep(audioRef.current);
+    const ctx = audioRef.current;
+    if (!ctx) {
+      playBeep(null);
+      return;
+    }
+    void ctx.resume().then(() => playBeep(ctx)).catch(() => playBeep(ctx));
   }
 
   function tick() {
@@ -92,6 +97,7 @@ export function SetTimer({ timer }: { timer: SlotTimer }) {
 
   useEffect(() => {
     function onVisible() {
+      void audioRef.current?.resume();
       tick();
       if (document.visibilityState === "visible" && endAt.current) void lockScreen();
     }

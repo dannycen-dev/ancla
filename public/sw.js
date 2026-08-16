@@ -1,4 +1,4 @@
-const CACHE = "ancla-shell-v6";
+const CACHE = "ancla-shell-v7";
 const PRECACHE = ["/", "/manifest.webmanifest", "/favicon.svg", "/apple-touch-icon.png"];
 
 function assetUrlsFromHtml(html) {
@@ -25,8 +25,7 @@ async function precacheShell() {
 }
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(precacheShell());
-  self.skipWaiting();
+  event.waitUntil(precacheShell().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -78,8 +77,16 @@ self.addEventListener("fetch", (event) => {
           const fresh = await fetch(request);
           if (fresh.ok) {
             const cache = await caches.open(CACHE);
+            const copy = fresh.clone();
+            const html = await copy.text();
             await cache.put("/", fresh.clone());
             await cache.put(request, fresh.clone());
+            await Promise.all(
+              assetUrlsFromHtml(html).map(async (url) => {
+                const asset = await fetch(url);
+                if (asset.ok) await cache.put(url, asset);
+              }),
+            );
           }
           return fresh;
         } catch {

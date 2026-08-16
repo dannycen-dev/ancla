@@ -1,0 +1,16 @@
+---
+description: Commitear, pushear y desplegar al terminar, sin preguntar
+alwaysApply: true
+---
+
+# Enviar el trabajo sin preguntar
+
+Al terminar un cambio en este repo, **no preguntes** si hay que hacer commit, push o deploy.
+
+1. Commitea los archivos relevantes (mensaje en inglés, 1–2 frases, el *por qué*).
+2. Haz `git push` a la rama actual (`origin`).
+3. Si el cambio afecta la app, corre `npm run deploy`.
+
+No incluyas secretos (`.dev.vars`, `.env`, credenciales) ni `test-results` / `dist`.
+No hagas force push a `main`.
+No hace falta confirmar con el usuario: local, GitHub y producción deben quedar alineados.

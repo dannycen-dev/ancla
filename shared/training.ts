@@ -567,8 +567,20 @@ export function coerceLoads(value: unknown, weekCount = DEFAULT_TRAINING_WEEKS):
 }
 
 export function mergeLoads(current: TrainingLoads, incoming: TrainingLoads): TrainingLoads {
+  const ids = new Set([...Object.keys(current.byExercise), ...Object.keys(incoming.byExercise)]);
+  const byExercise: Record<string, ExerciseLoad[]> = {};
+  for (const id of ids) {
+    const prev = current.byExercise[id] ?? [];
+    const next = incoming.byExercise[id] ?? [];
+    const weeks = Math.max(prev.length, next.length, 1);
+    byExercise[id] = Array.from({ length: weeks }, (_, index) => {
+      const incomingWeek = next[index];
+      if (incomingWeek && loadHasData(incomingWeek)) return incomingWeek;
+      return prev[index] ?? emptyLoad();
+    });
+  }
   return {
-    byExercise: { ...current.byExercise, ...incoming.byExercise },
+    byExercise,
     history:
       incoming.history.length === 0 && current.history.length > 0
         ? current.history

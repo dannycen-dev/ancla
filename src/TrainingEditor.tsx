@@ -398,12 +398,13 @@ function SessionFields({
           <button
             type="button"
             className="danger"
-            onClick={() =>
+            onClick={() => {
+              if (!window.confirm("¿Quitar este ejercicio?")) return;
               onChange({
                 ...session,
                 exercises: session.exercises.filter((row) => row.id !== exercise.id),
-              })
-            }
+              });
+            }}
           >
             Quitar ejercicio
           </button>
@@ -416,7 +417,14 @@ function SessionFields({
       >
         Añadir ejercicio
       </button>
-      <button type="button" className="danger" onClick={onRemove}>
+      <button
+        type="button"
+        className="danger"
+        onClick={() => {
+          if (!window.confirm("¿Quitar este día de entrenamiento?")) return;
+          onRemove();
+        }}
+      >
         Quitar día
       </button>
     </fieldset>

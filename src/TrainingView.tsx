@@ -39,7 +39,7 @@ import {
 } from "../shared/training.ts";
 import { parseWeight } from "../shared/rm.ts";
 import { coachSets } from "../shared/setCoach.ts";
-import { AuthError, loadDay, saveDay, saveLoads } from "./api.ts";
+import { AuthError, loadDay, registerDraftFlush, saveDay, saveLoads } from "./api.ts";
 import { RmCalculator } from "./RmCalculator.tsx";
 import { SetTimer } from "./SetTimer.tsx";
 import { SyncBanner } from "./SyncBanner.tsx";
@@ -63,6 +63,7 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
   const [followNow, setFollowNow] = useState(true);
   const [pickedDate, setPickedDate] = useState(todayIso);
   const [log, setLog] = useState<DayLog>(() => emptyLog(todayIso));
+  const [loadedDate, setLoadedDate] = useState("");
   const [loads, setLoads] = useState<TrainingLoads>(() => emptyLoads());
   const [accessoryCounts, setAccessoryCounts] = useState<Record<string, number>>({});
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -74,7 +75,7 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
   const logRef = useRef(log);
   logRef.current = log;
   const selectedDate = followNow ? todayIso : pickedDate;
-  const dayReady = log.date === selectedDate;
+  const dayReady = loadedDate === selectedDate;
   const view = dayReady ? log : emptyLog(selectedDate);
   const jsDay = weekdayFromISO(selectedDate);
   const week = cycleWeek(selectedDate, training.startedOn, training.weekCount);
@@ -97,11 +98,13 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
     let cancelled = false;
     const nextLogGen = ++logGen.current;
     const nextLoadGen = ++loadGen.current;
+    setLoadedDate("");
     void loadDay(selectedDate)
       .then((result) => {
         if (cancelled) return;
         if (nextLogGen === logGen.current) {
           setLog(result.log);
+          setLoadedDate(selectedDate);
           setAccessoryCounts(result.accessoryCounts);
         }
         if (nextLoadGen === loadGen.current) setLoads(result.loads);
@@ -127,7 +130,7 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
   }, [selectedDate]);
 
   function patchLog(next: DayLog) {
-    if (next.date !== selectedDate) return;
+    if (next.date !== selectedDate || loadedDate !== selectedDate) return;
     logGen.current += 1;
     setLog(next);
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -143,14 +146,15 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
   }
 
   function toggleExercise(id: string, session?: TrainingSession) {
-    if (log.date !== selectedDate) return;
-    const doneExerciseIds = log.doneExerciseIds.includes(id)
-      ? log.doneExerciseIds.filter((item) => item !== id)
-      : [...log.doneExerciseIds, id];
-    let doneSessionIds = log.doneSessionIds;
+    if (logRef.current.date !== selectedDate || loadedDate !== selectedDate) return;
+    const current = logRef.current;
+    const doneExerciseIds = current.doneExerciseIds.includes(id)
+      ? current.doneExerciseIds.filter((item) => item !== id)
+      : [...current.doneExerciseIds, id];
+    let doneSessionIds = current.doneSessionIds;
     if (session?.weeklyGoal) {
       const anyDone = session.exercises.some((item) =>
-        item.id === id ? !log.doneExerciseIds.includes(id) : doneExerciseIds.includes(item.id),
+        item.id === id ? !current.doneExerciseIds.includes(id) : doneExerciseIds.includes(item.id),
       );
       doneSessionIds = anyDone
         ? doneSessionIds.includes(session.id)
@@ -158,15 +162,16 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
           : [...doneSessionIds, session.id]
         : doneSessionIds.filter((item) => item !== session.id);
     }
-    patchLog({ ...log, doneExerciseIds, doneSessionIds });
+    patchLog({ ...current, doneExerciseIds, doneSessionIds });
   }
 
   function toggleSession(id: string) {
-    if (log.date !== selectedDate) return;
-    const doneSessionIds = log.doneSessionIds.includes(id)
-      ? log.doneSessionIds.filter((item) => item !== id)
-      : [...log.doneSessionIds, id];
-    patchLog({ ...log, doneSessionIds });
+    if (logRef.current.date !== selectedDate || loadedDate !== selectedDate) return;
+    const current = logRef.current;
+    const doneSessionIds = current.doneSessionIds.includes(id)
+      ? current.doneSessionIds.filter((item) => item !== id)
+      : [...current.doneSessionIds, id];
+    patchLog({ ...current, doneSessionIds });
   }
 
   function patchLoad(exerciseId: string, value: ExerciseLoad) {
@@ -222,7 +227,11 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
       }
     }
     window.addEventListener("ancla-flush-drafts", flushDraft);
-    return () => window.removeEventListener("ancla-flush-drafts", flushDraft);
+    const stop = registerDraftFlush(flushDraft);
+    return () => {
+      window.removeEventListener("ancla-flush-drafts", flushDraft);
+      stop();
+    };
   }, []);
 
   const liftNames = [
@@ -232,7 +241,7 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
   const priorStats = week > 1 ? weekLiftStats(training, loads, week - 1) : [];
 
   return (
-    <main className="page">
+    <main className="page" aria-busy={dayReady ? undefined : true}>
       <header className="topbar">
         <div>
           <p className="eyebrow">Entrenamiento</p>
@@ -879,6 +888,10 @@ function ExerciseRow({
               onChange={(event) => {
                 setNoteDraft(event.target.value);
                 setNoteSaved(false);
+              }}
+              onBlur={() => {
+                onSaveNote({ ...load, note: noteDraft.trim(), sets });
+                setNoteSaved(true);
               }}
             />
           </label>

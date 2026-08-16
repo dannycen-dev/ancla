@@ -138,13 +138,40 @@ export async function readCachedLoads(): Promise<TrainingLoads> {
   return coerceLoads(await getValue<unknown>(LOADS_KEY));
 }
 
-export async function enqueueOutbox(item: OutboxItem): Promise<void> {
+export async function enqueueOutbox(item: OutboxItem): Promise<boolean> {
   try {
     await withStore(OUTBOX, "readwrite", (store) => store.put(item, outboxKey(item)));
   } catch {
-    return;
+    return false;
   }
   await notifyPending();
+  return true;
+}
+
+export async function removeOutboxIfUnchanged(key: string, snapshot: string): Promise<boolean> {
+  try {
+    const db = await openDb();
+    const removed = await new Promise<boolean>((resolve, reject) => {
+      const tx = db.transaction(OUTBOX, "readwrite");
+      const store = tx.objectStore(OUTBOX);
+      const get = store.get(key);
+      get.onerror = () => reject(get.error ?? tx.error);
+      get.onsuccess = () => {
+        const current = get.result as OutboxItem | undefined;
+        if (!current || JSON.stringify(current) !== snapshot) {
+          resolve(false);
+          return;
+        }
+        const del = store.delete(key);
+        del.onerror = () => reject(del.error ?? tx.error);
+        del.onsuccess = () => resolve(true);
+      };
+    });
+    if (removed) await notifyPending();
+    return removed;
+  } catch {
+    return false;
+  }
 }
 
 export async function removeOutbox(key: string): Promise<void> {

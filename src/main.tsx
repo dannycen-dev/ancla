@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
-import { flushPending } from "./api.ts";
+import { flushDraftsNow, flushPending } from "./api.ts";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -17,12 +17,11 @@ function kickSync() {
 window.addEventListener("online", kickSync);
 window.addEventListener("pageshow", kickSync);
 window.addEventListener("pagehide", () => {
-  window.dispatchEvent(new Event("ancla-flush-drafts"));
-  void flushPending();
+  void flushDraftsNow().then(() => flushPending());
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
-    window.dispatchEvent(new Event("ancla-flush-drafts"));
+    void flushDraftsNow();
     return;
   }
   kickSync();
@@ -40,14 +39,7 @@ function syncKeyboardInset() {
 
 function scrollFocusedIntoKeyboardView(el: HTMLElement) {
   syncKeyboardInset();
-  const viewport = window.visualViewport;
-  const viewHeight = viewport?.height ?? window.innerHeight;
-  const rect = el.getBoundingClientRect();
-  const top = viewport?.offsetTop ?? 0;
-  const viewBottom = top + viewHeight - 16;
-  if (rect.bottom <= viewBottom && rect.top >= top) return;
-  const delta = rect.top - top - viewHeight * 0.28;
-  window.scrollBy({ top: delta, behavior: "auto" });
+  el.scrollIntoView({ block: "center", behavior: "auto" });
 }
 
 document.addEventListener("focusin", (event) => {

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gymDurationMinutes, isDateKey, normalizeClock, stampEndFromDateAndClock, stampFromDateAndClock } from "../shared/log.ts";
+import { gymDurationMinutes, clockFromStamp, isDateKey, normalizeClock, stampEndFromDateAndClock, stampFromDateAndClock } from "../shared/log.ts";
 
 test("Safari iOS manda HH:MM:SS y se normaliza", () => {
   expect(normalizeClock("07:30:00")).toBe("07:30");
@@ -7,6 +7,8 @@ test("Safari iOS manda HH:MM:SS y se normaliza", () => {
   expect(normalizeClock("19:45:12.500")).toBe("19:45");
   expect(normalizeClock("24:00")).toBeNull();
   expect(stampFromDateAndClock("2026-08-16", "07:30:00")).toMatch(/T/);
+  const stamp = stampFromDateAndClock("2026-08-16", "07:30");
+  expect(clockFromStamp(stamp)).toBe("07:30:00");
 });
 
 test("término después de medianoche cuenta en el mismo gym", () => {

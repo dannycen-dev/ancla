@@ -54,6 +54,7 @@ test.describe("iPhone Safari", () => {
   test("cambiar de día no pega las marcas del día anterior", async ({ page }) => {
     await loginPage(page);
     await page.getByRole("button", { name: /Plan alimenticio/i }).click();
+    await expect(page.locator("main.page")).not.toHaveAttribute("aria-busy", "true");
     const slot = page.getByRole("heading", { name: "Probióticos" }).locator("xpath=ancestor::section[1]");
     await expect(slot.getByRole("button", { name: "Marcar", exact: true })).toBeVisible();
     await slot.getByRole("button", { name: "Marcar", exact: true }).click();
@@ -61,10 +62,12 @@ test.describe("iPhone Safari", () => {
 
     const week = page.getByRole("navigation", { name: "Día de la semana" });
     await week.getByRole("button").filter({ hasNotText: /hoy/i }).first().click();
+    await expect(page.locator("main.page")).not.toHaveAttribute("aria-busy", "true");
     await expect(page.getByRole("button", { name: "Marcar", exact: true }).first()).toBeVisible();
     await expect(page.getByRole("heading", { name: /Tu plan, a la mano/i })).toHaveCount(0);
 
     await week.getByRole("button").filter({ hasText: /hoy/i }).click();
+    await expect(page.locator("main.page")).not.toHaveAttribute("aria-busy", "true");
     await expect(slot.getByRole("button", { name: "Hecho", exact: true })).toBeVisible();
   });
 

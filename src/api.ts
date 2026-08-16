@@ -18,7 +18,7 @@ import {
   readCachedPantry,
   readCachedPlan,
   readOutboxItem,
-  removeOutbox,
+  removeOutboxIfUnchanged,
   type OutboxItem,
 } from "./offline.ts";
 
@@ -43,16 +43,40 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   return fetch(input, { credentials: "include", ...init });
 }
 
+const draftFlushers = new Set<() => void | Promise<void>>();
+
+export function registerDraftFlush(flush: () => void | Promise<void>): () => void {
+  draftFlushers.add(flush);
+  return () => {
+    draftFlushers.delete(flush);
+  };
+}
+
+export async function flushDraftsNow(): Promise<void> {
+  window.dispatchEvent(new Event("ancla-flush-drafts"));
+  await Promise.all([...draftFlushers].map((flush) => Promise.resolve(flush()).catch(() => undefined)));
+}
+
+export async function persistStorage(): Promise<void> {
+  try {
+    await navigator.storage?.persist?.();
+  } catch {
+    /* Safari puede negar persistencia. */
+  }
+}
+
 export async function login(password: string): Promise<void> {
   const response = await apiFetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password }),
+    signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) {
     const body = (await parseJson(response)) as { error?: string } | null;
     throw new Error(body?.error ?? "No se pudo iniciar sesión.");
   }
+  await persistStorage();
   clearLoggedOut();
 }
 
@@ -88,14 +112,9 @@ export function isLoggedOutLocally(): boolean {
   }
 }
 
-export function flushDraftsNow(): void {
-  window.dispatchEvent(new Event("ancla-flush-drafts"));
-}
-
 export async function logout(): Promise<void> {
   markLoggedOut();
-  flushDraftsNow();
-  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  await flushDraftsNow();
   await flushPending().catch(() => undefined);
   let serverOk = false;
   try {
@@ -131,7 +150,7 @@ export async function changePassword(current: string, next: string): Promise<voi
 
 export async function probeSession(): Promise<SessionStatus> {
   try {
-    const response = await apiFetch("/api/me");
+    const response = await apiFetch("/api/me", { signal: AbortSignal.timeout(3000) });
     if (response.ok) return "ok";
     if (response.status === 401) return "unauth";
     return "offline";
@@ -193,6 +212,7 @@ async function putJson(url: string, body: unknown): Promise<Response> {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    keepalive: true,
   });
 }
 
@@ -250,6 +270,10 @@ async function uploadItem(item: OutboxItem): Promise<UploadResult> {
   if (item.kind !== "day") return { status: "ok" };
   const day = payloadFromBody(item.log.date, body as DayBody | null) ?? fallbackDay(item.log, await readCachedLoads());
   await cacheLog(day.log);
+  const queuedLoads = await readOutboxItem("loads");
+  if (queuedLoads?.kind === "loads") {
+    return { status: "ok", day: { ...day, loads: queuedLoads.loads } };
+  }
   await cacheLoads(day.loads);
   return { status: "ok", day };
 }
@@ -260,11 +284,11 @@ async function uploadLatest(key: string): Promise<UploadResult> {
   const snapshot = JSON.stringify(item);
   const result = await uploadItem(item);
   if (result.status !== "ok") return result;
-  const current = await readOutboxItem(key);
-  if (current && JSON.stringify(current) !== snapshot) {
-    return uploadLatest(key);
+  const removed = await removeOutboxIfUnchanged(key, snapshot);
+  if (!removed) {
+    const current = await readOutboxItem(key);
+    if (current) return uploadLatest(key);
   }
-  await removeOutbox(key);
   return result;
 }
 
@@ -282,7 +306,8 @@ export async function flushPending(): Promise<{ remaining: number; authLost: boo
 }
 
 async function rememberAndUpload(item: OutboxItem): Promise<UploadResult> {
-  await enqueueOutbox(item);
+  const queued = await enqueueOutbox(item);
+  if (!queued) return serialize(() => uploadItem(item));
   return serialize(() => uploadLatest(outboxKey(item)));
 }
 

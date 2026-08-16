@@ -27,7 +27,7 @@ import {
   variationIndex,
   weekdayFromISO,
 } from "../shared/schedule.ts";
-import { AuthError, loadDay, saveDay } from "./api.ts";
+import { AuthError, loadDay, registerDraftFlush, saveDay } from "./api.ts";
 import { Calendar } from "./Calendar.tsx";
 import { Coach } from "./Coach.tsx";
 import { Pantry } from "./Pantry.tsx";
@@ -59,6 +59,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
   const [pickedDate, setPickedDate] = useState(todayIso);
   const [showNotes, setShowNotes] = useState(false);
   const [log, setLog] = useState<DayLog>(() => emptyLog(todayIso));
+  const [loadedDate, setLoadedDate] = useState("");
   const [weekZeroCal, setWeekZeroCal] = useState(0);
   const [weekFreeMeals, setWeekFreeMeals] = useState(0);
   const [weekDietBreaks, setWeekDietBreaks] = useState(0);
@@ -89,10 +90,12 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
   useEffect(() => {
     let cancelled = false;
     const gen = ++loadGen.current;
+    setLoadedDate("");
     void loadDay(date)
       .then((result) => {
         if (cancelled || gen !== loadGen.current) return;
         setLog(result.log);
+        setLoadedDate(date);
         setWeekZeroCal(result.weekZeroCal);
         setWeekFreeMeals(result.weekFreeMeals);
         setWeekDietBreaks(result.weekDietBreaks);
@@ -109,7 +112,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
     };
   }, [date]);
 
-  const dayReady = log.date === date;
+  const dayReady = loadedDate === date;
   const view = dayReady ? log : emptyLog(date);
   const greenDone = greenToday.filter((item) => view.doneSlotIds.includes(item.slotId)).length;
 
@@ -121,7 +124,11 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
       persist(logRef.current);
     }
     window.addEventListener("ancla-flush-drafts", flushDraft);
-    return () => window.removeEventListener("ancla-flush-drafts", flushDraft);
+    const stop = registerDraftFlush(flushDraft);
+    return () => {
+      window.removeEventListener("ancla-flush-drafts", flushDraft);
+      stop();
+    };
   }, []);
 
   function applyWeek(result: { weekZeroCal: number; weekFreeMeals: number; weekDietBreaks: number }) {
@@ -131,6 +138,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
   }
 
   function persist(next: DayLog) {
+    if (next.date !== date && loadedDate !== next.date) return;
     void saveDay(next)
       .then(applyWeek)
       .catch((err: unknown) => {
@@ -139,7 +147,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
   }
 
   function patchLog(next: DayLog, debounce = false) {
-    if (next.date !== date) return;
+    if (next.date !== date || loadedDate !== date) return;
     loadGen.current += 1;
     setLog(next);
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -151,11 +159,12 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
   }
 
   function toggleSlot(id: string) {
-    if (log.date !== date) return;
-    const doneSlotIds = log.doneSlotIds.includes(id)
-      ? log.doneSlotIds.filter((item) => item !== id)
-      : [...log.doneSlotIds, id];
-    patchLog({ ...log, doneSlotIds });
+    const current = logRef.current;
+    if (current.date !== date || loadedDate !== date) return;
+    const doneSlotIds = current.doneSlotIds.includes(id)
+      ? current.doneSlotIds.filter((item) => item !== id)
+      : [...current.doneSlotIds, id];
+    patchLog({ ...current, doneSlotIds });
   }
 
   useEffect(() => {
@@ -169,7 +178,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
   }, [currentId, tab]);
 
   return (
-    <main className="page">
+    <main className="page" aria-busy={dayReady ? undefined : true}>
       <header className="topbar">
         <div>
           <p className="eyebrow">{isToday ? "Ahora mismo" : "Menú del día"}</p>

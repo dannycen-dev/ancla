@@ -61,7 +61,8 @@ function PasswordForm({ onCancel, onAuthLost }: { onCancel: () => void; onAuthLo
       className="habit"
       onSubmit={(event) => {
         event.preventDefault();
-        const data = new FormData(event.currentTarget);
+        const form = event.currentTarget;
+        const data = new FormData(form);
         const current = String(data.get("current") ?? "");
         const next = String(data.get("next") ?? "");
         const confirm = String(data.get("confirm") ?? "");
@@ -75,7 +76,7 @@ function PasswordForm({ onCancel, onAuthLost }: { onCancel: () => void; onAuthLo
         void changePassword(current, next)
           .then(() => {
             setOk(true);
-            event.currentTarget.reset();
+            form.reset();
           })
           .catch((err: unknown) => {
             if (err instanceof AuthError) {

@@ -362,9 +362,10 @@ export function Editor({ plan, busy, error, onChange, onSave, onCancel }: Editor
           <button
             type="button"
             className="danger"
-            onClick={() =>
-              onChange({ ...plan, meals: plan.meals.filter((item) => item.id !== meal.id) })
-            }
+            onClick={() => {
+              if (!window.confirm("¿Quitar esta comida del plan?")) return;
+              onChange({ ...plan, meals: plan.meals.filter((item) => item.id !== meal.id) });
+            }}
           >
             Quitar comida
           </button>
