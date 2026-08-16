@@ -188,8 +188,49 @@ label {
   background: #3b6ea8;
 }
 
-.gym-clock label {
+.gym-clock {
+  overflow: hidden;
+}
+
+.gym-clock label,
+.gym-time-field {
+  display: block;
   margin-top: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.gym-time-field {
+  overflow: hidden;
+}
+
+.gym-time-field input[type="time"] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.gym-time-field input[type="time"]::-webkit-date-and-time-value {
+  text-align: left;
+  min-width: 0;
+}
+
+.gym-time-field input[type="time"]::-webkit-datetime-edit {
+  min-width: 0;
+}
+
+.gym-time-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.gym-time-actions button {
+  flex: 1 1 120px;
 }
 
 input[type="time"],
@@ -367,6 +408,8 @@ h1 {
   padding: 16px;
   margin-bottom: 14px;
   box-shadow: var(--shadow);
+  overflow-x: hidden;
+  min-width: 0;
 }
 
 .habit.is-complete {
@@ -387,6 +430,12 @@ h1 {
   align-items: flex-start;
   gap: 12px;
   margin-bottom: 8px;
+  min-width: 0;
+}
+
+.habit-head .check {
+  flex: 0 1 auto;
+  max-width: 58%;
 }
 
 .habit-head h2,

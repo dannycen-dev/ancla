@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { emptyLog, clockFromStamp, formatDuration, gymDurationMinutes, stampEndFromDateAndClock, stampFromDateAndClock, type DayLog } from "../shared/log.ts";
+import { emptyLog, clockFromStamp, formatDuration, gymDurationMinutes, normalizeClock, stampEndFromDateAndClock, stampFromDateAndClock, type DayLog } from "../shared/log.ts";
 import type { Plan } from "../shared/plan.ts";
 import {
   WEEK_ORDER,
@@ -348,19 +348,14 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
                 {view.gymStartedAt ? "Actualizar ahora" : "Empezar ahora"}
               </button>
             </div>
-            <label>
-              Hora en que inicié
-              <input
-                type="time"
-                step="60"
-                autoComplete="off"
-                value={clockFromStamp(view.gymStartedAt)}
-                onChange={(event) => {
-                  const stamp = stampFromDateAndClock(selectedDate, event.target.value);
-                  if (stamp) patchLog({ ...log, gymStartedAt: stamp });
-                }}
-              />
-            </label>
+            <GymTimeField
+              label="Hora en que inicié"
+              saved={view.gymStartedAt}
+              onCommit={(clock) => {
+                const stamp = stampFromDateAndClock(selectedDate, clock);
+                if (stamp) patchLog({ ...log, gymStartedAt: stamp });
+              }}
+            />
           </section>
 
           {mains.length === 0 && !beforeStart ? (
@@ -549,19 +544,14 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
                 {view.gymEndedAt ? "Actualizar ahora" : "Terminar ahora"}
               </button>
             </div>
-            <label>
-              Hora en que terminé
-              <input
-                type="time"
-                step="60"
-                autoComplete="off"
-                value={clockFromStamp(view.gymEndedAt)}
-                onChange={(event) => {
-                  const stamp = stampEndFromDateAndClock(selectedDate, event.target.value, log.gymStartedAt);
-                  if (stamp) patchLog({ ...log, gymEndedAt: stamp });
-                }}
-              />
-            </label>
+            <GymTimeField
+              label="Hora en que terminé"
+              saved={view.gymEndedAt}
+              onCommit={(clock) => {
+                const stamp = stampEndFromDateAndClock(selectedDate, clock, log.gymStartedAt);
+                if (stamp) patchLog({ ...log, gymEndedAt: stamp });
+              }}
+            />
             {durationLabel ? (
               <p className="meta">
                 Duración: {durationLabel}
@@ -579,6 +569,57 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
         </>
       ) : null}
     </main>
+  );
+}
+
+function clocksMatch(left: string, right: string): boolean {
+  return (normalizeClock(left) ?? "") === (normalizeClock(right) ?? "");
+}
+
+function GymTimeField({
+  label,
+  saved,
+  onCommit,
+}: {
+  label: string;
+  saved: string | null;
+  onCommit: (clock: string) => void;
+}) {
+  const savedClock = clockFromStamp(saved);
+  const [draft, setDraft] = useState(savedClock);
+  const dirty = !clocksMatch(draft, savedClock);
+
+  useEffect(() => {
+    setDraft(clockFromStamp(saved));
+  }, [saved]);
+
+  return (
+    <label className="gym-time-field">
+      {label}
+      <input
+        type="time"
+        step="60"
+        autoComplete="off"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      {dirty ? (
+        <div className="gym-time-actions">
+          <button type="button" className="ghost" onClick={() => setDraft(savedClock)}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!draft) return;
+              onCommit(draft);
+            }}
+          >
+            Guardar
+          </button>
+        </div>
+      ) : null}
+    </label>
   );
 }
 

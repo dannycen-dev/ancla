@@ -26,8 +26,15 @@ test.describe("iPhone Safari", () => {
     const startClock = page.getByLabel(/Hora en que inicié/i);
     if (await startClock.count()) {
       await startClock.fill("07:30");
+      await expect(page.getByRole("button", { name: "Cancelar" })).toBeVisible();
+      await page.getByRole("button", { name: "Cancelar" }).click();
+      await expect(page.getByRole("button", { name: "Guardar" })).toHaveCount(0);
+      await startClock.fill("07:30");
+      await page.getByRole("button", { name: "Guardar" }).click();
       await expect(startClock).toHaveValue(/07:30/);
     }
+    const gymOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(gymOverflow).toBeLessThanOrEqual(2);
 
     const timer = page.getByRole("button", { name: "Iniciar" }).first();
     if (await timer.count()) {
