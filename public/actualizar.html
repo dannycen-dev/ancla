@@ -4,10 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
+    <meta http-equiv="refresh" content="2;url=/index.html?fresh=1" />
     <title>Actualizar Ancla</title>
     <style>
       body {
-        font: 18px/1.45 system-ui, sans-serif;
+        font: 18px/1.45 "SF Pro Text", "Segoe UI", system-ui, sans-serif;
         background: #f3ead9;
         color: #1c1915;
         margin: 0;
@@ -15,25 +16,71 @@
         display: grid;
         place-items: center;
         padding: 24px;
+        text-align: center;
+      }
+      p {
+        margin: 0 0 16px;
+      }
+      a {
+        display: inline-block;
+        min-height: 44px;
+        line-height: 44px;
+        padding: 0 18px;
+        border-radius: 999px;
+        background: #1c1915;
+        color: #fffaf2;
+        text-decoration: none;
       }
     </style>
   </head>
   <body>
-    <p>Bajando la versión nueva…</p>
+    <div>
+      <p>Bajando la versión nueva…</p>
+      <p>
+        <a id="entrar" href="/index.html?fresh=1">Entrar a Ancla</a>
+      </p>
+      <p style="color: #6b6258; font-size: 15px">Si no avanza, ábrelo en Safari — no en WhatsApp — y pulsa el botón.</p>
+    </div>
     <script>
-      (async () => {
-        try {
+      (function () {
+        var gone = false;
+        function go() {
+          if (gone) return;
+          gone = true;
+          location.href = "/index.html?fresh=" + Date.now();
+        }
+        window.setTimeout(go, 600);
+        document.getElementById("entrar").addEventListener("click", function (event) {
+          event.preventDefault();
+          go();
+        });
+        function bust() {
+          var work = Promise.resolve();
           if ("serviceWorker" in navigator) {
-            const regs = await navigator.serviceWorker.getRegistrations();
-            await Promise.all(regs.map((registration) => registration.unregister()));
+            work = work
+              .then(function () {
+                return navigator.serviceWorker.getRegistrations();
+              })
+              .then(function (regs) {
+                return Promise.all(regs.map(function (registration) {
+                  return registration.unregister();
+                }));
+              });
           }
           if ("caches" in window) {
-            const keys = await caches.keys();
-            await Promise.all(keys.map((key) => caches.delete(key)));
+            work = work
+              .then(function () {
+                return caches.keys();
+              })
+              .then(function (keys) {
+                return Promise.all(keys.map(function (key) {
+                  return caches.delete(key);
+                }));
+              });
           }
-        } finally {
-          location.replace("/?fresh=" + Date.now());
+          return work;
         }
+        bust().then(go, go);
       })();
     </script>
   </body>

@@ -101,6 +101,17 @@ test.describe("iPhone Safari", () => {
   test("actualizar.html recarga el inicio", async ({ page }) => {
     await page.goto("/actualizar.html");
     await expect(page.getByRole("heading", { name: /Tu plan, a la mano/i })).toBeVisible();
-    await expect(page).toHaveURL(/\/$/);
+  });
+
+  test("actualizar.html no se queda si el service worker no responde", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "serviceWorker", {
+        configurable: true,
+        value: { getRegistrations: () => new Promise(() => undefined) },
+      });
+    });
+    await page.goto("/actualizar.html");
+    await expect(page.getByRole("link", { name: "Entrar a Ancla" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Tu plan, a la mano/i })).toBeVisible({ timeout: 8_000 });
   });
 });
