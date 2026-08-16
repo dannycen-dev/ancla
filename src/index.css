@@ -149,6 +149,10 @@ label {
   background: #3b6ea8;
 }
 
+.gym-clock label {
+  margin-top: 8px;
+}
+
 .now-banner.is-done {
   background: #6b6258;
 }
@@ -328,6 +332,14 @@ h1 {
   font-size: 20px;
 }
 
+.accessory-offday {
+  opacity: 0.82;
+}
+
+.accessory-offday p {
+  margin-bottom: 0;
+}
+
 .pips {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -466,6 +478,74 @@ h1 {
   background: #f0e7d8;
 }
 
+button.tone-chip {
+  min-height: 0;
+  width: auto;
+  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+button.tone-chip.is-open {
+  background: var(--ink);
+  color: #fffaf2;
+}
+
+.system-body {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.rm-form {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.rm-form button {
+  width: 100%;
+}
+
+.rm-result {
+  font-size: 22px;
+  margin: 8px 0 4px;
+  text-align: center;
+}
+
+.rm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rm-grid p {
+  margin: 0;
+  background: #f4ece0;
+  border-radius: 12px;
+  padding: 10px 8px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.rm-grid p:last-child {
+  grid-column: 2;
+}
+
+.rm-grid .is-plan {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.rm-grid strong {
+  display: block;
+  font-family: "Iowan Old Style", Palatino, ui-serif, serif;
+  font-size: 18px;
+  color: var(--ink);
+}
+
 .tone-chip[data-tone="green"] {
   background: var(--green-bg);
   color: var(--green);
@@ -554,6 +634,10 @@ h1 {
   grid-template-columns: 1fr 1fr;
 }
 
+.dock-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
 .hub {
   padding-bottom: 48px;
 }
@@ -608,8 +692,69 @@ h1 {
   margin: 0;
 }
 
-.exercise.is-done {
-  opacity: 0.72;
+.load-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.unit-picks {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.unit-picks button {
+  min-width: 52px;
+  background: #f4ece0;
+  color: var(--ink);
+}
+
+.unit-picks button.is-on {
+  background: var(--ink);
+  color: #fffaf2;
+}
+
+.load-note {
+  margin-top: 10px;
+}
+
+.load-note-toggle {
+  margin-top: 8px;
+}
+
+.exercise-media-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.exercise-media-item {
+  margin: 0;
+}
+
+.exercise-media-item .exercise-media {
+  margin: 0;
+}
+
+.exercise-media-item figcaption {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--muted, #6b7280);
+  text-transform: capitalize;
+}
+
+.exercise-media {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  margin: 8px 0 10px;
+  object-fit: contain;
+  object-position: center;
+  background: #fff;
+  border-radius: 14px;
 }
 
 .gym-session h2 {

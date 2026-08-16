@@ -34,6 +34,7 @@ export type TrainingExercise = {
   name: string;
   prescription: string;
   systemId: string | null;
+  media: string[];
 };
 
 export type TrainingSession = {
@@ -47,9 +48,12 @@ export type TrainingSession = {
   exercises: TrainingExercise[];
 };
 
+export const TRAINING_CONTENT_VERSION = 7;
+
 export type TrainingPlan = {
   startedOn: string;
   weekCount: number;
+  contentVersion: number;
   notes: string[];
   systems: TrainingSystem[];
   rmNotes: RmNote[];
@@ -58,8 +62,16 @@ export type TrainingPlan = {
   cardioWeekdays: number[];
 };
 
+export type LoadUnit = "kg" | "lb";
+
+export type ExerciseLoad = {
+  weight: string;
+  unit: LoadUnit;
+  note: string;
+};
+
 export type TrainingLoads = {
-  byExercise: Record<string, string[]>;
+  byExercise: Record<string, ExerciseLoad[]>;
 };
 
 export const BLOCK_LABEL: Record<TrainingBlock, string> = {
@@ -77,6 +89,7 @@ export function emptyExercise(): TrainingExercise {
     name: "Nuevo ejercicio",
     prescription: "3x10",
     systemId: null,
+    media: [],
   };
 }
 
@@ -111,8 +124,37 @@ export function emptyRmNote(): RmNote {
   };
 }
 
+export function emptyLoad(): ExerciseLoad {
+  return { weight: "", unit: "kg", note: "" };
+}
+
 export function emptyLoads(): TrainingLoads {
   return { byExercise: {} };
+}
+
+function asMediaList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value === "string") {
+    return value
+      .split(/\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function coerceMedia(value: unknown, fallback: string[] = []): string[] {
+  const cleaned = asMediaList(value)
+    .map((item) => item.trim())
+    .filter((item) => item.startsWith("/exercises/"))
+    .map((item) => item.slice(0, 160));
+  if (fallback.length > cleaned.length) return fallback;
+  return cleaned.length ? cleaned : fallback;
+}
+
+export function mediaCaption(src: string): string {
+  const stem = src.replace(/^\/exercises\//, "").replace(/\.[^.]+$/, "");
+  return stem.replace(/-/g, " ");
 }
 
 export function cycleWeek(date: string, startedOn: string, weekCount: number): number {
@@ -137,7 +179,11 @@ function isExercise(value: unknown): value is TrainingExercise {
     typeof item.id === "string" &&
     typeof item.name === "string" &&
     typeof item.prescription === "string" &&
-    (item.systemId === null || typeof item.systemId === "string")
+    (item.systemId === null || typeof item.systemId === "string") &&
+    (item.media === undefined ||
+      item.media === null ||
+      typeof item.media === "string" ||
+      (Array.isArray(item.media) && item.media.every((path) => typeof path === "string")))
   );
 }
 
@@ -176,29 +222,38 @@ export function isTrainingPlan(value: unknown): value is TrainingPlan {
 }
 
 export function normalizeTraining(plan: TrainingPlan, fallback: TrainingPlan): TrainingPlan {
+  const storedVersion = typeof plan.contentVersion === "number" ? plan.contentVersion : 0;
+  const source = storedVersion < TRAINING_CONTENT_VERSION ? fallback : plan;
+  const seedMedia = new Map<string, string[]>();
+  for (const session of fallback.sessions) {
+    for (const exercise of session.exercises) {
+      if (exercise.media.length) seedMedia.set(exercise.id, exercise.media);
+    }
+  }
   return {
-    ...plan,
+    ...source,
+    contentVersion: TRAINING_CONTENT_VERSION,
     startedOn:
       typeof plan.startedOn === "string" && isDateKey(plan.startedOn)
         ? plan.startedOn
         : fallback.startedOn,
     weekCount:
-      Number.isFinite(plan.weekCount) && plan.weekCount > 0
-        ? Math.min(12, Math.round(plan.weekCount))
+      Number.isFinite(source.weekCount) && source.weekCount > 0
+        ? Math.min(12, Math.round(source.weekCount))
         : fallback.weekCount,
-    notes: plan.notes.filter((note) => typeof note === "string").map((note) => note.slice(0, 500)),
-    systems: plan.systems.map((item) => ({
+    notes: source.notes.filter((note) => typeof note === "string").map((note) => note.slice(0, 500)),
+    systems: source.systems.map((item) => ({
       ...item,
       name: item.name.slice(0, 80),
       example: item.example.slice(0, 160),
       body: item.body.slice(0, 800),
     })),
-    rmNotes: plan.rmNotes.map((item) => ({
+    rmNotes: source.rmNotes.map((item) => ({
       ...item,
       title: item.title.slice(0, 80),
       body: item.body.slice(0, 500),
     })),
-    sessions: plan.sessions.map((session) => ({
+    sessions: source.sessions.map((session) => ({
       ...session,
       id: session.id || crypto.randomUUID(),
       label: session.label.slice(0, 80),
@@ -213,13 +268,47 @@ export function normalizeTraining(plan: TrainingPlan, fallback: TrainingPlan): T
         ...exercise,
         name: exercise.name.slice(0, 120),
         prescription: exercise.prescription.slice(0, 240),
+        media: coerceMedia(exercise.media, seedMedia.get(exercise.id)),
       })),
     })),
-    cardioOptions: plan.cardioOptions
+    cardioOptions: source.cardioOptions
       .filter((item) => typeof item === "string")
       .map((item) => item.slice(0, 160)),
-    cardioWeekdays: plan.cardioWeekdays.filter((day) => day >= 0 && day <= 6),
+    cardioWeekdays: source.cardioWeekdays.filter((day) => day >= 0 && day <= 6),
   };
+}
+
+export function parseLoad(value: unknown): ExerciseLoad {
+  if (value && typeof value === "object") {
+    const row = value as Partial<ExerciseLoad>;
+    return {
+      weight: sanitizeWeight(typeof row.weight === "string" ? row.weight : ""),
+      unit: row.unit === "lb" ? "lb" : "kg",
+      note: typeof row.note === "string" ? row.note.slice(0, 160) : "",
+    };
+  }
+  if (typeof value !== "string") return emptyLoad();
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d+(?:[.,]\d+)?)\s*(kg|kgs|kilo|kilos|lb|lbs|libra|libras)?$/i);
+  if (match) {
+    return {
+      weight: sanitizeWeight(match[1]),
+      unit: match[2] && /^lb/i.test(match[2]) ? "lb" : "kg",
+      note: "",
+    };
+  }
+  if (/^\d+(?:[.,]\d+)?$/.test(trimmed)) {
+    return { weight: sanitizeWeight(trimmed), unit: "kg", note: "" };
+  }
+  return { weight: "", unit: "kg", note: trimmed.slice(0, 160) };
+}
+
+function sanitizeWeight(value: string): string {
+  const next = value.replace(",", ".").replace(/[^\d.]/g, "");
+  const [whole, ...rest] = next.split(".");
+  const decimals = rest.join("").slice(0, 2);
+  const joined = rest.length ? `${whole.slice(0, 5)}.${decimals}` : whole.slice(0, 5);
+  return joined.slice(0, 8);
 }
 
 export function coerceLoads(value: unknown, weekCount = DEFAULT_TRAINING_WEEKS): TrainingLoads {
@@ -227,33 +316,31 @@ export function coerceLoads(value: unknown, weekCount = DEFAULT_TRAINING_WEEKS):
   const raw = (value as { byExercise?: unknown }).byExercise;
   if (raw === null || typeof raw !== "object") return emptyLoads();
   const weeks = Math.max(1, Math.min(12, weekCount));
-  const byExercise: Record<string, string[]> = {};
+  const byExercise: Record<string, ExerciseLoad[]> = {};
   for (const [id, row] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof id !== "string" || id.length > 80) continue;
     const values = Array.isArray(row) ? row : [];
-    byExercise[id] = Array.from({ length: weeks }, (_, index) =>
-      typeof values[index] === "string" ? values[index].slice(0, 32) : "",
-    );
+    byExercise[id] = Array.from({ length: weeks }, (_, index) => parseLoad(values[index]));
   }
   return { byExercise };
 }
 
-export function loadForWeek(loads: TrainingLoads, exerciseId: string, week: number): string {
-  return loads.byExercise[exerciseId]?.[weekIndex(week)] ?? "";
+export function loadForWeek(loads: TrainingLoads, exerciseId: string, week: number): ExerciseLoad {
+  return loads.byExercise[exerciseId]?.[weekIndex(week)] ?? emptyLoad();
 }
 
 export function setLoad(
   loads: TrainingLoads,
   exerciseId: string,
   week: number,
-  value: string,
+  value: ExerciseLoad,
   weekCount = DEFAULT_TRAINING_WEEKS,
 ): TrainingLoads {
   const weeks = Math.max(1, Math.min(12, weekCount));
-  const current = loads.byExercise[exerciseId] ?? Array.from({ length: weeks }, () => "");
+  const current = loads.byExercise[exerciseId] ?? Array.from({ length: weeks }, () => emptyLoad());
   const next = current.slice(0, weeks);
-  while (next.length < weeks) next.push("");
-  next[weekIndex(week)] = value.slice(0, 32);
+  while (next.length < weeks) next.push(emptyLoad());
+  next[weekIndex(week)] = parseLoad(value);
   return {
     byExercise: {
       ...loads.byExercise,
@@ -275,6 +362,29 @@ export function mainSessionsForDate(plan: TrainingPlan, date: string): TrainingS
 
 export function accessorySessions(plan: TrainingPlan): TrainingSession[] {
   return plan.sessions.filter((session) => session.block === "accesorio");
+}
+
+export function accessorySessionsForDate(plan: TrainingPlan, date: string): TrainingSession[] {
+  const week = cycleWeek(date, plan.startedOn, plan.weekCount);
+  const weekday = weekdayFromISO(date);
+  return accessorySessions(plan).filter(
+    (session) =>
+      session.weekdays.includes(weekday) &&
+      (session.weeks.length === 0 || session.weeks.includes(week)),
+  );
+}
+
+export function weekdaySummary(days: number[]): string {
+  const labels = WEEKDAY_OPTIONS.filter((day) => days.includes(day.jsDay)).map((day) => day.label);
+  if (labels.length === 0) return "sin día";
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]} y ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")} y ${labels.at(-1)}`;
+}
+
+export function isWeekendDay(date: string): boolean {
+  const day = weekdayFromISO(date);
+  return day === 0 || day === 6;
 }
 
 export function cardioApplies(plan: TrainingPlan, date: string): boolean {

@@ -15,6 +15,7 @@ import {
   accessorySessions,
   cardioApplies,
   cycleWeek,
+  isWeekendDay,
   mainSessionsForDate,
 } from "../shared/training.ts";
 
@@ -25,7 +26,7 @@ Hablas en español de México, corto y claro. No eres el nutriólogo ni el entre
 Usa solo los datos del contexto. Si falta información, dilo.
 Da 3 a 6 viñetas accionables. Si hubo comida libre o se rompió la dieta, sugiere cómo volver al plan sin culpa.
 Recuerda: 3 comidas libres por semana, 2 comidas verdes al día, 3.5 L de agua, probióticos en ayunas, omega-3 con el desayuno.
-El gym empieza el 17 de agosto de 2026. Abdomen y antebrazo van 2 veces por semana. El cardio del gym es opcional.`;
+El gym empieza el 17 de agosto de 2026. Días fuertes: lunes a viernes. Sábado y domingo son descanso; si va, cardio fácil o recuperar abdomen/antebrazo, sin pesado. Abdomen y antebrazo: 2 veces por semana (lunes y viernes). Cardio opcional lun–vie.`;
 
 export async function runAdvice(
   ai: Ai,
@@ -109,7 +110,9 @@ function buildContext(input: {
   const mains = mainSessionsForDate(training, date);
   const gymToday =
     mains.length === 0
-      ? "Descanso de pesas."
+      ? isWeekendDay(date)
+        ? "Fin de semana de descanso. Si va al gym: cardio fácil 25–30 min o recuperar abdomen/antebrazo si faltó; sin día pesado."
+        : "Descanso de pesas."
       : mains
           .map((session) => {
             const done = todayLog
@@ -125,15 +128,20 @@ function buildContext(input: {
       return `${session.label} ${weekDone}/${session.weeklyGoal ?? 2} esta semana`;
     })
     .join("; ");
-  const cardio = cardioApplies(training, date)
-    ? `Cardio opcional hoy (${training.cardioOptions.join(" / ")}). Hecho: ${todayLog?.cardioDone ? "sí" : "no"}.`
-    : "Hoy no toca cardio de gym.";
+  const cardio =
+    cardioApplies(training, date) || isWeekendDay(date)
+      ? `Cardio opcional hoy (${training.cardioOptions.join(" / ")}). Hecho: ${todayLog?.cardioDone ? "sí" : "no"}.`
+      : "Hoy no toca cardio de gym.";
+  const gymClock =
+    todayLog?.gymStartedAt || todayLog?.gymEndedAt
+      ? `Gym inicio ${todayLog.gymStartedAt ?? "—"} / término ${todayLog.gymEndedAt ?? "—"}.`
+      : "Sin hora de inicio/término de gym.";
 
   return `Fecha: ${dayName(jsDay)} ${formatDayLong(date)}
 Objetivo: ${plan.goals.map((item) => item.title).join("; ")}
 Cardio nutriólogo: ${plan.cardio}
 Gym: semana ${week} de ${training.weekCount}, inicia ${training.startedOn}. ${gymToday}
-Accesorios: ${accessories || "ninguno"}. ${cardio}
+Accesorios: ${accessories || "ninguno"}. ${cardio} ${gymClock}
 Consulta: ${consult}
 Quincena: ${periodTitle(period)} (${period.payLabel})
 Menú de hoy:

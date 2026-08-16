@@ -47,6 +47,26 @@ export async function logout(): Promise<void> {
   }
 }
 
+export async function changePassword(current: string, next: string): Promise<void> {
+  const response = await fetch("/api/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ current, next }),
+  });
+  if (response.status === 401) {
+    const body = (await parseJson(response)) as { error?: string } | null;
+    if (body?.error === "La contraseña actual no coincide.") {
+      throw new Error(body.error);
+    }
+    throw new AuthError();
+  }
+  if (!response.ok) {
+    const body = (await parseJson(response)) as { error?: string } | null;
+    throw new Error(body?.error ?? "No se pudo cambiar la contraseña.");
+  }
+}
+
 export async function checkSession(): Promise<boolean> {
   try {
     const response = await fetch("/api/me", { credentials: "include" });

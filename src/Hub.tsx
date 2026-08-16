@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { AuthError, changePassword } from "./api.ts";
+
 type HubProps = {
   title: string;
   fromCache: boolean;
@@ -7,6 +10,8 @@ type HubProps = {
 };
 
 export function Hub({ title, fromCache, onFood, onGym, onLogout }: HubProps) {
+  const [showPassword, setShowPassword] = useState(false);
+
   return (
     <main className="page hub">
       <header className="topbar">
@@ -15,14 +20,21 @@ export function Hub({ title, fromCache, onFood, onGym, onLogout }: HubProps) {
           <h1>{title}</h1>
           <p className="meta">Elige qué plan quieres ver hoy.</p>
         </div>
-        <button type="button" className="ghost" onClick={onLogout}>
-          Salir
-        </button>
+        <div className="topbar-actions">
+          <button type="button" className="ghost" onClick={() => setShowPassword((value) => !value)}>
+            Contraseña
+          </button>
+          <button type="button" className="ghost" onClick={onLogout}>
+            Salir
+          </button>
+        </div>
       </header>
 
       {fromCache ? (
         <p className="banner">Sin conexión. Mostrando la última versión guardada en este teléfono.</p>
       ) : null}
+
+      {showPassword ? <PasswordForm onCancel={() => setShowPassword(false)} onAuthLost={onLogout} /> : null}
 
       <button type="button" className="hub-card" onClick={onFood}>
         <span className="eyebrow">Comida</span>
@@ -36,5 +48,68 @@ export function Hub({ title, fromCache, onFood, onGym, onLogout }: HubProps) {
         <em>Rutina de agosto, pesos por semana y accesorios.</em>
       </button>
     </main>
+  );
+}
+
+function PasswordForm({ onCancel, onAuthLost }: { onCancel: () => void; onAuthLost: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState(false);
+
+  return (
+    <form
+      className="habit"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const current = String(data.get("current") ?? "");
+        const next = String(data.get("next") ?? "");
+        const confirm = String(data.get("confirm") ?? "");
+        setError("");
+        setOk(false);
+        if (next !== confirm) {
+          setError("La confirmación no coincide.");
+          return;
+        }
+        setBusy(true);
+        void changePassword(current, next)
+          .then(() => {
+            setOk(true);
+            event.currentTarget.reset();
+          })
+          .catch((err: unknown) => {
+            if (err instanceof AuthError) {
+              onAuthLost();
+              return;
+            }
+            setError(err instanceof Error ? err.message : "No se pudo cambiar.");
+          })
+          .finally(() => setBusy(false));
+      }}
+    >
+      <h2>Nueva contraseña</h2>
+      <label>
+        Contraseña actual
+        <input name="current" type="password" autoComplete="current-password" required />
+      </label>
+      <label>
+        Nueva contraseña
+        <input name="next" type="password" autoComplete="new-password" minLength={8} required />
+      </label>
+      <label>
+        Confirmar nueva
+        <input name="confirm" type="password" autoComplete="new-password" minLength={8} required />
+      </label>
+      {error ? <p className="form-error">{error}</p> : null}
+      {ok ? <p className="meta">Listo. Ya puedes entrar con la nueva contraseña.</p> : null}
+      <div className="save-bar">
+        <button type="button" className="ghost" onClick={onCancel} disabled={busy}>
+          Cerrar
+        </button>
+        <button type="submit" disabled={busy}>
+          {busy ? "Guardando…" : "Guardar contraseña"}
+        </button>
+      </div>
+    </form>
   );
 }

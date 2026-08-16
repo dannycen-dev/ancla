@@ -10,8 +10,10 @@ import { runAdvice } from "./advise.ts";
 import {
   clearSessionCookie,
   createSessionCookie,
+  hashPassword,
   hasValidSession,
   passwordsMatch,
+  verifyHashedPassword,
 } from "./auth.ts";
 import {
   MAX_JSON_BYTES,
@@ -27,7 +29,9 @@ import {
 
 const PLAN_KEY = "current";
 const LOADS_KEY = "loads";
+const PASSWORD_KEY = "auth:password";
 const MAX_PASSWORD = 128;
+const MIN_PASSWORD = 8;
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -53,6 +57,13 @@ async function readLoads(env: Env, weekCount: number): Promise<TrainingLoads> {
   return coerceLoads(stored, weekCount);
 }
 
+async function passwordAccepted(env: Env, given: string): Promise<boolean> {
+  const stored = await env.PLAN_KV.get(PASSWORD_KEY);
+  if (stored) return verifyHashedPassword(given, stored);
+  const fallback = env.APP_PASSWORD;
+  return Boolean(fallback) && passwordsMatch(given, fallback);
+}
+
 async function requireAuth(c: Context<{ Bindings: Env }>) {
   const secret = c.env.SESSION_SECRET;
   if (!secret || !(await hasValidSession(c.req.raw, secret))) {
@@ -75,7 +86,7 @@ app.post("/api/login", async (c) => {
 
   const body = (await readJson(c.req.raw, MAX_JSON_BYTES.login)) as { password?: unknown } | null;
   const given = typeof body?.password === "string" ? body.password.slice(0, MAX_PASSWORD) : "";
-  if (!passwordsMatch(given, password)) {
+  if (!(await passwordAccepted(c.env, given))) {
     await rememberLoginFailure(c.env.PLAN_KV, ip);
     return c.json({ error: "Contraseña incorrecta." }, 401);
   }
@@ -87,6 +98,29 @@ app.post("/api/login", async (c) => {
 
 app.post("/api/logout", (c) => {
   c.header("Set-Cookie", clearSessionCookie(c.req.url));
+  return c.json({ ok: true });
+});
+
+app.post("/api/password", async (c) => {
+  const denied = await requireAuth(c);
+  if (denied) return denied;
+
+  const body = (await readJson(c.req.raw, MAX_JSON_BYTES.login)) as {
+    current?: unknown;
+    next?: unknown;
+  } | null;
+  const current = typeof body?.current === "string" ? body.current.slice(0, MAX_PASSWORD) : "";
+  const next = typeof body?.next === "string" ? body.next.slice(0, MAX_PASSWORD) : "";
+  if (!(await passwordAccepted(c.env, current))) {
+    return c.json({ error: "La contraseña actual no coincide." }, 401);
+  }
+  if (next.length < MIN_PASSWORD) {
+    return c.json({ error: `La nueva contraseña debe tener al menos ${MIN_PASSWORD} caracteres.` }, 400);
+  }
+  if (next === current) {
+    return c.json({ error: "La nueva contraseña debe ser distinta." }, 400);
+  }
+  await c.env.PLAN_KV.put(PASSWORD_KEY, await hashPassword(next));
   return c.json({ ok: true });
 });
 

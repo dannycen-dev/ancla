@@ -6,7 +6,7 @@ export const MAX_JSON_BYTES = {
   advise: 2_048,
   day: 32_768,
   pantry: 16_384,
-  loads: 65_536,
+  loads: 200_000,
   plan: 512_000,
 } as const;
 

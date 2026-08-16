@@ -15,6 +15,8 @@ export type DayLog = {
   doneExerciseIds: string[];
   doneSessionIds: string[];
   cardioDone: boolean;
+  gymStartedAt: string | null;
+  gymEndedAt: string | null;
 };
 
 export const WATER_GOAL_HALVES = 7;
@@ -35,6 +37,8 @@ export function emptyLog(date: string): DayLog {
     doneExerciseIds: [],
     doneSessionIds: [],
     cardioDone: false,
+    gymStartedAt: null,
+    gymEndedAt: null,
   };
 }
 
@@ -79,12 +83,49 @@ export function coerceLog(value: unknown, date: string): DayLog | null {
     doneExerciseIds: coerceIdList(log.doneExerciseIds),
     doneSessionIds: coerceIdList(log.doneSessionIds),
     cardioDone: Boolean(log.cardioDone),
+    gymStartedAt: coerceStamp(log.gymStartedAt),
+    gymEndedAt: coerceStamp(log.gymEndedAt),
   };
 }
 
 function coerceIdList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length < 80).slice(0, 80);
+}
+
+function coerceStamp(value: unknown): string | null {
+  if (typeof value !== "string" || value.length < 10 || value.length > 40) return null;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+
+export function clockFromStamp(stamp: string | null): string {
+  if (!stamp) return "";
+  const date = new Date(stamp);
+  if (!Number.isFinite(date.getTime())) return "";
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+export function stampFromDateAndClock(date: string, clock: string): string | null {
+  if (!isDateKey(date) || !/^\d{2}:\d{2}$/.test(clock)) return null;
+  const [hour, minute] = clock.split(":").map(Number);
+  const next = new Date(`${date}T00:00:00`);
+  next.setHours(hour, minute, 0, 0);
+  return Number.isFinite(next.getTime()) ? next.toISOString() : null;
+}
+
+export function gymDurationMinutes(startedAt: string | null, endedAt: string | null): number | null {
+  if (!startedAt || !endedAt) return null;
+  const minutes = Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 60_000);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
+}
+
+export function formatDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest} min`;
+  if (rest === 0) return `${hours} h`;
+  return `${hours} h ${rest} min`;
 }
 
 export function isDayLog(value: unknown): value is DayLog {

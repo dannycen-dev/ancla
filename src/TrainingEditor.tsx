@@ -361,6 +361,24 @@ function SessionFields({
             />
           </label>
           <label>
+            GIFs o imágenes (una por línea)
+            <textarea
+              rows={2}
+              value={exercise.media.join("\n")}
+              placeholder="/exercises/nombre.gif"
+              onChange={(event) => {
+                const media = event.target.value
+                  .split("\n")
+                  .map((item) => item.trim())
+                  .filter(Boolean);
+                const exercises = session.exercises.map((row, i) =>
+                  i === index ? { ...row, media } : row,
+                );
+                onChange({ ...session, exercises });
+              }}
+            />
+          </label>
+          <label>
             Sistema
             <select
               value={exercise.systemId ?? ""}

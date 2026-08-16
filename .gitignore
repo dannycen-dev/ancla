@@ -29,3 +29,6 @@ dist-ssr
 !.dev.vars.example
 .env*
 !.env.example
+
+# Drop folder of raw GIFs; the app serves public/exercises
+gif-exercises
