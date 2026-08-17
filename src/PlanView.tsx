@@ -92,6 +92,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
     let cancelled = false;
     const gen = ++loadGen.current;
     setLoadedDate("");
+    setLog(emptyLog(date));
     void loadDay(date)
       .then((result) => {
         if (cancelled || gen !== loadGen.current) return;
@@ -179,7 +180,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
   }, [currentId, tab]);
 
   return (
-    <main className="page" aria-busy={dayReady ? undefined : true}>
+    <main className="page">
       <header className="topbar">
         <div>
           <p className="eyebrow">{isToday ? "Ahora mismo" : "Menú del día"}</p>
@@ -240,7 +241,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
       ) : null}
 
       {tab === "hoy" ? (
-        <>
+        <div aria-busy={dayReady ? undefined : true}>
       <nav className="week" aria-label="Día de la semana">
         {WEEK_ORDER.map((day) => {
           const iso = dateForWeekday(day, parseISODate(selectedDate));
@@ -249,6 +250,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
             key={day}
             type="button"
             className={iso === selectedDate ? "is-active" : ""}
+            aria-pressed={iso === selectedDate}
             aria-current={iso === todayIso ? "date" : undefined}
             onClick={() => goToDate(iso)}
           >
@@ -299,11 +301,11 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
         ))}
       </ol>
 
-      <section className={`habit ${log.waterHalves >= WATER_GOAL_HALVES ? "is-complete" : ""}`}>
+      <section className={`habit ${view.waterHalves >= WATER_GOAL_HALVES ? "is-complete" : ""}`}>
         <div className="habit-head">
           <h2>Agua</h2>
           <strong>
-            {liters(log.waterHalves)} / 3.5 L
+            {liters(view.waterHalves)} / 3.5 L
           </strong>
         </div>
         <div className="pips" role="group" aria-label="Agua del día">
@@ -313,12 +315,13 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
               <button
                 key={value}
                 type="button"
-                className={log.waterHalves >= value ? "is-on" : ""}
+                className={view.waterHalves >= value ? "is-on" : ""}
                 aria-label={`${liters(value)} litros`}
+                disabled={!dayReady}
                 onClick={() =>
                   patchLog({
-                    ...log,
-                    waterHalves: log.waterHalves === value ? value - 1 : value,
+                    ...view,
+                    waterHalves: view.waterHalves === value ? value - 1 : value,
                   })
                 }
               >
@@ -329,25 +332,26 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
         </div>
         <button
           type="button"
-          className={`check-line ${log.waterHalves >= WATER_GOAL_HALVES ? "is-on" : ""}`}
+          className={`check-line ${view.waterHalves >= WATER_GOAL_HALVES ? "is-on" : ""}`}
           disabled={!dayReady}
           onClick={() =>
             patchLog({
-              ...log,
-              waterHalves: log.waterHalves >= WATER_GOAL_HALVES ? 0 : WATER_GOAL_HALVES,
+              ...view,
+              waterHalves: view.waterHalves >= WATER_GOAL_HALVES ? 0 : WATER_GOAL_HALVES,
             })
           }
         >
-          {log.waterHalves >= WATER_GOAL_HALVES ? "Listo: 3.5 L" : "Marcar 3.5 L"}
+          {view.waterHalves >= WATER_GOAL_HALVES ? "Listo: 3.5 L" : "Marcar 3.5 L"}
         </button>
         <div className="extra-water">
-          <span>Agua extra {liters(log.extraWaterHalves)} L</span>
+          <span>Agua extra {liters(view.extraWaterHalves)} L</span>
           <div>
             <button
               type="button"
               className="ghost"
+              disabled={!dayReady}
               onClick={() =>
-                patchLog({ ...log, extraWaterHalves: Math.max(0, log.extraWaterHalves - 1) })
+                patchLog({ ...view, extraWaterHalves: Math.max(0, view.extraWaterHalves - 1) })
               }
             >
               −
@@ -355,7 +359,8 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
             <button
               type="button"
               className="ghost"
-              onClick={() => patchLog({ ...log, extraWaterHalves: log.extraWaterHalves + 1 })}
+              disabled={!dayReady}
+              onClick={() => patchLog({ ...view, extraWaterHalves: view.extraWaterHalves + 1 })}
             >
               + 0.5 L
             </button>
@@ -363,7 +368,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
         </div>
       </section>
 
-      <section className={`habit ${log.zeroCalDrink ? "is-complete" : ""}`}>
+      <section className={`habit ${view.zeroCalDrink ? "is-complete" : ""}`}>
         <div className="habit-head">
           <h2>Bebida cero</h2>
           <strong>
@@ -373,14 +378,15 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
         <p>Clight Zero, Be Light, Coca-Cola sin azúcar, etc. Máximo 4 veces por semana.</p>
         <button
           type="button"
-          className={`check-line ${log.zeroCalDrink ? "is-on" : ""}`}
-          onClick={() => patchLog({ ...log, zeroCalDrink: !log.zeroCalDrink })}
+          className={`check-line ${view.zeroCalDrink ? "is-on" : ""}`}
+          disabled={!dayReady}
+          onClick={() => patchLog({ ...view, zeroCalDrink: !view.zeroCalDrink })}
         >
-          {log.zeroCalDrink ? "Hoy sí la tomé" : "Marcar bebida de hoy"}
+          {view.zeroCalDrink ? "Hoy sí la tomé" : "Marcar bebida de hoy"}
         </button>
       </section>
 
-      <section className={`habit ${log.freeMeal ? "is-complete" : ""}`}>
+      <section className={`habit ${view.freeMeal ? "is-complete" : ""}`}>
         <div className="habit-head">
           <h2>Comida libre</h2>
           <strong>
@@ -390,25 +396,27 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
         <p>3 a la semana. El resto de comidas siguen el plan.</p>
         <button
           type="button"
-          className={`check-line ${log.freeMeal ? "is-on" : ""}`}
-          onClick={() => patchLog({ ...log, freeMeal: !log.freeMeal })}
+          className={`check-line ${view.freeMeal ? "is-on" : ""}`}
+          disabled={!dayReady}
+          onClick={() => patchLog({ ...view, freeMeal: !view.freeMeal })}
         >
-          {log.freeMeal ? "Hoy usé una libre" : "Marcar comida libre de hoy"}
+          {view.freeMeal ? "Hoy usé una libre" : "Marcar comida libre de hoy"}
         </button>
-        {log.freeMeal ? (
+        {view.freeMeal ? (
           <label>
             Qué comiste
             <textarea
               rows={2}
-              value={log.freeMealNote}
+              value={view.freeMealNote}
               placeholder="Tacos, pizza, antojo de la oficina…"
-              onChange={(event) => patchLog({ ...log, freeMealNote: event.target.value }, true)}
+              disabled={!dayReady}
+              onChange={(event) => patchLog({ ...view, freeMealNote: event.target.value }, true)}
             />
           </label>
         ) : null}
       </section>
 
-      <section className={`habit ${log.dietBreaks.length > 0 ? "is-alert" : ""}`}>
+      <section className={`habit ${view.dietBreaks.length > 0 ? "is-alert" : ""}`}>
         <div className="habit-head">
           <h2>¿Rompiste la dieta?</h2>
           <strong>
@@ -416,43 +424,45 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
           </strong>
         </div>
         <p>Anota qué fue, para el historial. Si pasó más de una vez, suma otra con +.</p>
-        {log.dietBreaks.map((item, index) => (
+        {view.dietBreaks.map((item, index) => (
           <label key={item.id}>
-            {log.dietBreaks.length > 1 ? `Qué comiste · ${index + 1}` : "Qué comiste"}
+            {view.dietBreaks.length > 1 ? `Qué comiste · ${index + 1}` : "Qué comiste"}
             <textarea
               rows={2}
               value={item.text}
               placeholder="Galletas, refresco, algo fuera del plan…"
+              disabled={!dayReady}
               onChange={(event) => {
-                const dietBreaks = log.dietBreaks.map((row) =>
+                const dietBreaks = view.dietBreaks.map((row) =>
                   row.id === item.id ? { ...row, text: event.target.value } : row,
                 );
-                patchLog({ ...log, dietBreaks }, true);
+                patchLog({ ...view, dietBreaks }, true);
               }}
             />
           </label>
         ))}
         <div className="extra-water">
           <span>
-            {log.dietBreaks.length === 0
+            {view.dietBreaks.length === 0
               ? "Hoy no se ha marcado"
-              : log.dietBreaks.length === 1
+              : view.dietBreaks.length === 1
                 ? "1 vez hoy"
-                : `${log.dietBreaks.length} veces hoy`}
+                : `${view.dietBreaks.length} veces hoy`}
           </span>
           <div>
             <button
               type="button"
               className="ghost"
-              disabled={log.dietBreaks.length === 0}
-              onClick={() => patchLog({ ...log, dietBreaks: log.dietBreaks.slice(0, -1) })}
+              disabled={!dayReady || view.dietBreaks.length === 0}
+              onClick={() => patchLog({ ...view, dietBreaks: view.dietBreaks.slice(0, -1) })}
             >
               −
             </button>
             <button
               type="button"
               className="ghost"
-              onClick={() => patchLog({ ...log, dietBreaks: [...log.dietBreaks, emptyBreak()] })}
+              disabled={!dayReady}
+              onClick={() => patchLog({ ...view, dietBreaks: [...view.dietBreaks, emptyBreak()] })}
             >
               +
             </button>
@@ -501,7 +511,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
           ))}
         </>
       ) : null}
-        </>
+        </div>
       ) : null}
     </main>
   );

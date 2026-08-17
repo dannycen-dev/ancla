@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isPlan, normalizePlan, type Plan } from "../shared/plan.ts";
 import { AuthError, flushPending, isLoggedOutLocally, loadPlan, logout, probeSession, registerDraftFlush, savePlan } from "./api.ts";
 import { Editor } from "./Editor.tsx";
@@ -28,6 +28,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [recoverToken, setRecoverToken] = useState(recoverTokenFromUrl);
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
 
   useEffect(() => {
     return subscribePending((count) => {
@@ -35,22 +37,29 @@ export default function App() {
       if (count === 0) {
         void probeSession().then((status) => {
           if (status === "ok") setFromCache(false);
+          if (status === "unauth") handleAuthLost();
         });
       }
     });
   }, []);
 
   useEffect(() => {
-    function clearCacheFlag() {
+    function onSession() {
       void probeSession().then((status) => {
         if (status === "ok") setFromCache(false);
+        if (status === "unauth") handleAuthLost();
       });
     }
-    window.addEventListener("online", clearCacheFlag);
-    window.addEventListener("pageshow", clearCacheFlag);
+    function onAuthLost() {
+      handleAuthLost();
+    }
+    window.addEventListener("online", onSession);
+    window.addEventListener("pageshow", onSession);
+    window.addEventListener("ancla-auth-lost", onAuthLost);
     return () => {
-      window.removeEventListener("online", clearCacheFlag);
-      window.removeEventListener("pageshow", clearCacheFlag);
+      window.removeEventListener("online", onSession);
+      window.removeEventListener("pageshow", onSession);
+      window.removeEventListener("ancla-auth-lost", onAuthLost);
     };
   }, []);
 
@@ -155,6 +164,7 @@ export default function App() {
   }
 
   function handleAuthLost() {
+    if (screenRef.current === "login" || screenRef.current === "boot") return;
     void logout().finally(() => {
       setPlan(null);
       setDraft(null);
@@ -263,6 +273,7 @@ export default function App() {
       onFood={() => setScreen("food")}
       onGym={() => setScreen("gym")}
       onLogout={handleLogout}
+      onAuthLost={handleAuthLost}
     />
   );
 }

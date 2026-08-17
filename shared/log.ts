@@ -116,7 +116,7 @@ export function clockFromStamp(stamp: string | null): string {
   if (!stamp) return "";
   const date = new Date(stamp);
   if (!Number.isFinite(date.getTime())) return "";
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:00`;
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 export function stampFromDateAndClock(date: string, clock: string): string | null {

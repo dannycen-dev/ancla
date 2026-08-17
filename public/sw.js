@@ -1,4 +1,4 @@
-const CACHE = "ancla-shell-v8";
+const CACHE = "ancla-shell-v9";
 const PRECACHE = ["/", "/manifest.webmanifest", "/favicon.svg", "/apple-touch-icon.png"];
 
 function assetUrlsFromHtml(html) {
@@ -13,22 +13,70 @@ function isBustPage(url) {
   return url.pathname === "/actualizar.html" || url.pathname === "/actualizar";
 }
 
+function shouldBypass(url) {
+  return (
+    isBustPage(url) ||
+    url.searchParams.has("fresh") ||
+    url.pathname === "/actualizar.js" ||
+    url.pathname === "/sw.js"
+  );
+}
+
+function isAppHtml(html) {
+  return html.includes('id="root"') && !/Bajando la versi[oó]n/i.test(html);
+}
+
+function looksLikeAsset(url, response) {
+  const type = (response.headers.get("content-type") || "").toLowerCase();
+  if (url.pathname.startsWith("/assets/") || url.pathname.endsWith(".js")) {
+    return type.includes("javascript") || type.includes("ecmascript");
+  }
+  if (url.pathname.endsWith(".css")) return type.includes("css");
+  if (
+    url.pathname.endsWith(".png") ||
+    url.pathname.endsWith(".svg") ||
+    url.pathname.endsWith(".webp") ||
+    url.pathname.endsWith(".jpg") ||
+    url.pathname.endsWith(".jpeg")
+  ) {
+    return type.includes("image") || type.includes("svg");
+  }
+  if (url.pathname.endsWith(".webmanifest")) return type.includes("json") || type.includes("manifest");
+  return !type.includes("text/html");
+}
+
+async function storeShell(response) {
+  const html = await response.clone().text();
+  if (!isAppHtml(html)) return;
+  const cache = await caches.open(CACHE);
+  const headers = new Headers(response.headers);
+  headers.set("Content-Type", "text/html; charset=utf-8");
+  const body = new Response(html, { status: response.status, statusText: response.statusText, headers });
+  await cache.put("/", body.clone());
+  await cache.put("/index.html", body.clone());
+  await Promise.all(
+    assetUrlsFromHtml(html).map(async (assetUrl) => {
+      try {
+        const asset = await fetch(assetUrl, { cache: "reload" });
+        if (asset.ok && looksLikeAsset(new URL(assetUrl, self.location.origin), asset)) {
+          await cache.put(assetUrl, asset);
+        }
+      } catch {
+        /* Un asset suelto no debe bloquear el HTML. */
+      }
+    }),
+  );
+}
+
 async function precacheShell() {
   const cache = await caches.open(CACHE);
-  await cache.addAll(PRECACHE);
+  await cache.addAll(PRECACHE.filter((path) => path !== "/"));
   try {
     const index = await fetch("/", { cache: "reload" });
     if (!index.ok) return;
-    await cache.put("/", index.clone());
-    const html = await index.text();
-    await Promise.all(
-      assetUrlsFromHtml(html).map(async (url) => {
-        const response = await fetch(url, { cache: "reload" });
-        if (response.ok) await cache.put(url, response);
-      }),
-    );
+    await storeShell(index);
   } catch {
-    /* Instalación sin red: se usa lo que ya había en PRECACHE. */
+    /* Instalación sin red: se usa lo que ya había. */
   }
 }
 
@@ -61,7 +109,7 @@ self.addEventListener("message", (event) => {
 
 function shouldCache(url) {
   if (url.pathname.startsWith("/api/")) return false;
-  if (isBustPage(url)) return false;
+  if (isBustPage(url) || url.searchParams.has("fresh")) return false;
   if (url.pathname.startsWith("/assets/")) return true;
   return (
     isAppShell(url) ||
@@ -83,16 +131,13 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
+  if (shouldBypass(url)) return;
 
   const hashed = url.pathname.startsWith("/assets/");
   const navigate = request.mode === "navigate";
-  const bustPage = isBustPage(url);
 
   event.respondWith(
     (async () => {
-      if (bustPage) {
-        return fetch(request, { cache: "reload" });
-      }
       if (hashed) {
         const cached = await caches.match(request);
         if (cached) return cached;
@@ -100,19 +145,9 @@ self.addEventListener("fetch", (event) => {
       if (navigate) {
         const cached = (await caches.match(request)) || (await caches.match("/"));
         try {
-          const fresh = await fetch(request, { cache: "reload" });
+          const fresh = await fetch(url.href, { cache: "reload" });
           if (fresh.ok && isAppShell(url)) {
-            const cache = await caches.open(CACHE);
-            const copy = fresh.clone();
-            const html = await copy.text();
-            await cache.put("/", fresh.clone());
-            await cache.put(request, fresh.clone());
-            await Promise.all(
-              assetUrlsFromHtml(html).map(async (assetUrl) => {
-                const asset = await fetch(assetUrl, { cache: "reload" });
-                if (asset.ok) await cache.put(assetUrl, asset);
-              }),
-            );
+            event.waitUntil(storeShell(fresh));
           }
           return fresh;
         } catch {
@@ -121,8 +156,8 @@ self.addEventListener("fetch", (event) => {
         }
       }
       try {
-        const fresh = await fetch(request);
-        if (fresh.ok && shouldCache(url)) {
+        const fresh = await fetch(url.href, { cache: "reload" });
+        if (fresh.ok && shouldCache(url) && looksLikeAsset(url, fresh)) {
           const cache = await caches.open(CACHE);
           void cache.put(request, fresh.clone()).catch(() => undefined);
         }

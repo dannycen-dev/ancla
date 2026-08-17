@@ -123,4 +123,13 @@ test.describe("iPhone Safari", () => {
     await expect(page.getByRole("link", { name: "Entrar a Ancla" })).toBeVisible();
     await expect(page.getByRole("heading", { name: /Tu plan, a la mano/i })).toBeVisible({ timeout: 8_000 });
   });
+
+  test("actualizar.js está en un archivo propio", async ({ request }) => {
+    const page = await request.get("/actualizar.html");
+    expect(await page.text()).toMatch(/src="\/actualizar\.js"/);
+    expect(await page.text()).not.toMatch(/preventDefault/);
+    const script = await request.get("/actualizar.js");
+    expect(script.ok()).toBeTruthy();
+    expect(script.headers()["content-type"] ?? "").toMatch(/javascript|ecmascript/i);
+  });
 });

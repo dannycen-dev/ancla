@@ -123,7 +123,13 @@ app.post("/api/login", async (c) => {
   return c.json({ ok: true });
 });
 
-app.post("/api/logout", (c) => {
+app.post("/api/logout", async (c) => {
+  const secret = c.env.SESSION_SECRET;
+  const session = secret ? await parseSession(c.req.raw, secret) : null;
+  if (session) {
+    const generation = (await sessionGeneration(c.env)) + 1;
+    await c.env.PLAN_KV.put(GEN_KEY, String(generation));
+  }
   c.header("Set-Cookie", clearSessionCookie(c.req.url));
   return c.json({ ok: true });
 });

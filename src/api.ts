@@ -115,10 +115,15 @@ export function isLoggedOutLocally(): boolean {
 export async function logout(): Promise<void> {
   markLoggedOut();
   await flushDraftsNow();
-  await flushPending().catch(() => undefined);
+  await Promise.race([
+    flushPending().catch(() => undefined),
+    new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 2500);
+    }),
+  ]);
   let serverOk = false;
   try {
-    const response = await apiFetch("/api/logout", { method: "POST" });
+    const response = await apiFetch("/api/logout", { method: "POST", signal: AbortSignal.timeout(4000) });
     serverOk = response.ok;
   } catch {
     /* Sin red la cookie sigue; la bandera local impide reentrar al volver la señal. */

@@ -242,4 +242,19 @@ test.describe("API", () => {
 
     await loginApi(request);
   });
+
+  test("salir invalida la cookie anterior", async ({ request }) => {
+    await loginApi(request);
+    const state = await request.storageState();
+    const cookie = state.cookies.find((item) => item.name === "ancla_session");
+    expect(cookie?.value).toBeTruthy();
+    const logout = await request.post("/api/logout");
+    expect(logout.ok()).toBeTruthy();
+    const me = await request.get("/api/me");
+    expect(me.status()).toBe(401);
+    const replay = await request.get("/api/me", {
+      headers: { Cookie: `ancla_session=${cookie!.value}` },
+    });
+    expect(replay.status()).toBe(401);
+  });
 });

@@ -20,7 +20,9 @@ createRoot(document.getElementById("root")!).render(
 }
 
 function kickSync() {
-  void flushPending();
+  void flushPending().then((result) => {
+    if (result.authLost) window.dispatchEvent(new Event("ancla-auth-lost"));
+  });
 }
 
 window.addEventListener("online", kickSync);
@@ -71,7 +73,15 @@ if (window.visualViewport) {
   syncKeyboardInset();
 }
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+function inAppBrowser(): boolean {
+  return /WhatsApp|FBAN|FBAV|Instagram|Line\//i.test(navigator.userAgent);
+}
+
+function isStandalone(): boolean {
+  return window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as { standalone?: boolean }).standalone);
+}
+
+if (import.meta.env.PROD && "serviceWorker" in navigator && (!inAppBrowser() || isStandalone())) {
   void navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((registration) => {
     const update = () => void registration.update();
     document.addEventListener("visibilitychange", () => {

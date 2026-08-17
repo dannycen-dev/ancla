@@ -16,7 +16,8 @@ const APP_PASSWORD = readDevVar("ANCLA_PASSWORD") || readDevVar("APP_PASSWORD");
 
 export default defineConfig({
   testDir: "./tests",
-  fullyParallel: true,
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: "list",

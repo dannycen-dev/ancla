@@ -100,6 +100,7 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
     const nextLogGen = ++logGen.current;
     const nextLoadGen = ++loadGen.current;
     setLoadedDate("");
+    setLog(emptyLog(selectedDate));
     void loadDay(selectedDate)
       .then((result) => {
         if (cancelled) return;
@@ -242,7 +243,7 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
   const priorStats = week > 1 ? weekLiftStats(training, loads, week - 1) : [];
 
   return (
-    <main className="page" aria-busy={dayReady ? undefined : true}>
+    <main className="page">
       <header className="topbar">
         <div>
           <p className="eyebrow">Entrenamiento</p>
@@ -313,7 +314,7 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
         />
       ) : null}
       {tab === "hoy" ? (
-        <>
+        <div aria-busy={dayReady ? undefined : true}>
           <p className="meta">
             Semana {week} de {training.weekCount} · empieza el {formatDayLong(training.startedOn)} ·
             corte lunes 1:00 a.m.
@@ -340,22 +341,26 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
               <button
                 type="button"
                 className={`check ${view.gymStartedAt ? "is-on" : ""}`}
+                aria-pressed={Boolean(view.gymStartedAt)}
+                disabled={!dayReady}
                 onClick={() => {
                   const stamp =
                     stampFromDateAndClock(selectedDate, clockFromStamp(new Date().toISOString())) ??
                     new Date().toISOString();
-                  patchLog({ ...log, gymStartedAt: stamp });
+                  patchLog({ ...view, gymStartedAt: stamp });
                 }}
               >
                 {view.gymStartedAt ? "Actualizar ahora" : "Empezar ahora"}
               </button>
             </div>
             <GymTimeField
+              key={`${selectedDate}-start`}
               label="Hora en que inicié"
               saved={view.gymStartedAt}
+              disabled={!dayReady}
               onCommit={(clock) => {
                 const stamp = stampFromDateAndClock(selectedDate, clock);
-                if (stamp) patchLog({ ...log, gymStartedAt: stamp });
+                if (stamp) patchLog({ ...logRef.current, gymStartedAt: stamp });
               }}
             />
           </section>
@@ -411,7 +416,8 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
                   type="button"
                   className={`check ${view.cardioDone ? "is-on" : ""}`}
                   aria-pressed={view.cardioDone}
-                  onClick={() => patchLog({ ...log, cardioDone: !log.cardioDone })}
+                  disabled={!dayReady}
+                  onClick={() => patchLog({ ...view, cardioDone: !view.cardioDone })}
                 >
                   {view.cardioDone ? "Hecho" : "Marcar"}
                 </button>
@@ -533,25 +539,29 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
               <button
                 type="button"
                 className={`check ${view.gymEndedAt ? "is-on" : ""}`}
+                aria-pressed={Boolean(view.gymEndedAt)}
+                disabled={!dayReady}
                 onClick={() => {
                   const stamp =
                     stampEndFromDateAndClock(
                       selectedDate,
                       clockFromStamp(new Date().toISOString()),
-                      log.gymStartedAt,
+                      view.gymStartedAt,
                     ) ?? new Date().toISOString();
-                  patchLog({ ...log, gymEndedAt: stamp });
+                  patchLog({ ...view, gymEndedAt: stamp });
                 }}
               >
                 {view.gymEndedAt ? "Actualizar ahora" : "Terminar ahora"}
               </button>
             </div>
             <GymTimeField
+              key={`${selectedDate}-end`}
               label="Hora en que terminé"
               saved={view.gymEndedAt}
+              disabled={!dayReady}
               onCommit={(clock) => {
-                const stamp = stampEndFromDateAndClock(selectedDate, clock, log.gymStartedAt);
-                if (stamp) patchLog({ ...log, gymEndedAt: stamp });
+                const stamp = stampEndFromDateAndClock(selectedDate, clock, logRef.current.gymStartedAt);
+                if (stamp) patchLog({ ...logRef.current, gymEndedAt: stamp });
               }}
             />
             {durationLabel ? (
@@ -568,7 +578,7 @@ export function TrainingView({ plan, fromCache, pending, onHome, onEdit, onLogou
               <p className="meta">Marca inicio y término para guardar el tiempo de la sesión.</p>
             )}
           </section>
-        </>
+        </div>
       ) : null}
     </main>
   );
@@ -581,10 +591,12 @@ function clocksMatch(left: string, right: string): boolean {
 function GymTimeField({
   label,
   saved,
+  disabled,
   onCommit,
 }: {
   label: string;
   saved: string | null;
+  disabled?: boolean;
   onCommit: (clock: string) => void;
 }) {
   const savedClock = clockFromStamp(saved);
@@ -604,20 +616,22 @@ function GymTimeField({
           step="60"
           autoComplete="off"
           value={draft}
+          disabled={disabled}
           onChange={(event) => setDraft(event.target.value)}
         />
       </label>
       {dirty ? (
         <div className="gym-time-actions">
-          <button type="button" className="ghost" onClick={() => setDraft(savedClock)}>
+          <button type="button" className="ghost" disabled={disabled} onClick={() => setDraft(savedClock)}>
             Cancelar
           </button>
           <button
             type="button"
-            disabled={!draft}
+            disabled={disabled || !draft}
             onClick={() => {
-              if (!draft) return;
-              onCommit(draft);
+              const next = normalizeClock(draft);
+              if (!next) return;
+              onCommit(next);
             }}
           >
             Guardar

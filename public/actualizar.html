@@ -37,51 +37,13 @@
     <div>
       <p>Bajando la versión nueva…</p>
       <p>
-        <a id="entrar" href="/index.html?fresh=1">Entrar a Ancla</a>
+        <a href="/index.html?fresh=1">Entrar a Ancla</a>
       </p>
-      <p style="color: #6b6258; font-size: 15px">Si no avanza, ábrelo en Safari — no en WhatsApp — y pulsa el botón.</p>
+      <p style="color: #6b6258; font-size: 15px">
+        Ábrelo en Safari (no WhatsApp) y luego pulsa Recargar app dentro de Ancla. WhatsApp no actualiza el icono del
+        teléfono.
+      </p>
     </div>
-    <script>
-      (function () {
-        var gone = false;
-        function go() {
-          if (gone) return;
-          gone = true;
-          location.href = "/index.html?fresh=" + Date.now();
-        }
-        window.setTimeout(go, 600);
-        document.getElementById("entrar").addEventListener("click", function (event) {
-          event.preventDefault();
-          go();
-        });
-        function bust() {
-          var work = Promise.resolve();
-          if ("serviceWorker" in navigator) {
-            work = work
-              .then(function () {
-                return navigator.serviceWorker.getRegistrations();
-              })
-              .then(function (regs) {
-                return Promise.all(regs.map(function (registration) {
-                  return registration.unregister();
-                }));
-              });
-          }
-          if ("caches" in window) {
-            work = work
-              .then(function () {
-                return caches.keys();
-              })
-              .then(function (keys) {
-                return Promise.all(keys.map(function (key) {
-                  return caches.delete(key);
-                }));
-              });
-          }
-          return work;
-        }
-        bust().then(go, go);
-      })();
-    </script>
+    <script src="/actualizar.js"></script>
   </body>
 </html>

@@ -10,9 +10,10 @@ type HubProps = {
   onFood: () => void;
   onGym: () => void;
   onLogout: () => void;
+  onAuthLost: () => void;
 };
 
-export function Hub({ title, fromCache, pending, onFood, onGym, onLogout }: HubProps) {
+export function Hub({ title, fromCache, pending, onFood, onGym, onLogout, onAuthLost }: HubProps) {
   const [showPassword, setShowPassword] = useState(false);
 
   return (
@@ -36,7 +37,7 @@ export function Hub({ title, fromCache, pending, onFood, onGym, onLogout }: HubP
 
       <SyncBanner fromCache={fromCache} pending={pending} />
 
-      {showPassword ? <PasswordForm onCancel={() => setShowPassword(false)} onAuthLost={onLogout} /> : null}
+      {showPassword ? <PasswordForm onCancel={() => setShowPassword(false)} onAuthLost={onAuthLost} /> : null}
 
       <button type="button" className="hub-card" onClick={onFood}>
         <span className="eyebrow">Comida</span>
