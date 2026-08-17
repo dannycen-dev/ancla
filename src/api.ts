@@ -129,6 +129,34 @@ export async function logout(): Promise<void> {
   await clearOfflineData().catch(() => undefined);
 }
 
+export async function requestRecovery(): Promise<void> {
+  const response = await apiFetch("/api/recover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) {
+    const body = (await parseJson(response)) as { error?: string } | null;
+    throw new Error(body?.error ?? "No se pudo enviar el correo.");
+  }
+}
+
+export async function resetPasswordWithToken(token: string, next: string): Promise<void> {
+  const response = await apiFetch("/api/recover/reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, next }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) {
+    const body = (await parseJson(response)) as { error?: string } | null;
+    throw new Error(body?.error ?? "No se pudo cambiar la contraseña.");
+  }
+  await persistStorage();
+  clearLoggedOut();
+}
+
 export async function changePassword(next: string): Promise<void> {
   const response = await apiFetch("/api/password", {
     method: "POST",

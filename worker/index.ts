@@ -13,16 +13,23 @@ import {
   hashPassword,
   parseSession,
   passwordsMatch,
+  randomToken,
   shouldRefreshSession,
+  tokenDigestsMatch,
+  tokenDigest,
   verifyHashedPassword,
 } from "./auth.ts";
+import { sendRecoveryEmail } from "./mail.ts";
 import {
   MAX_JSON_BYTES,
   clearLoginFailures,
   clientIp,
+  isLocalHost,
   loginAllowed,
   noStoreApi,
   readJson,
+  recoverAllowed,
+  recoverResetAllowed,
   adviseAllowed,
   writeAllowed,
   requireSameOrigin,
@@ -33,8 +40,10 @@ const PLAN_KEY = "current";
 const LOADS_KEY = "loads";
 const PASSWORD_KEY = "auth:password";
 const GEN_KEY = "auth:gen";
+const RECOVER_KEY = "auth:recover";
 const MAX_PASSWORD = 128;
 const MIN_PASSWORD = 8;
+const RECOVER_TTL_SECONDS = 20 * 60;
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -116,6 +125,80 @@ app.post("/api/login", async (c) => {
 
 app.post("/api/logout", (c) => {
   c.header("Set-Cookie", clearSessionCookie(c.req.url));
+  return c.json({ ok: true });
+});
+
+app.post("/api/recover", async (c) => {
+  const secret = c.env.SESSION_SECRET;
+  if (!secret) return c.json({ error: "Servicio no disponible." }, 500);
+  const ip = clientIp(c.req.raw);
+  if (!(await recoverAllowed(c.env.PLAN_KV, ip))) {
+    return c.json({ error: "Demasiados intentos. Espera unos minutos." }, 429);
+  }
+
+  const token = randomToken();
+  const hash = await tokenDigest(secret, token);
+  const exp = Math.floor(Date.now() / 1000) + RECOVER_TTL_SECONDS;
+  await c.env.PLAN_KV.put(RECOVER_KEY, JSON.stringify({ hash, exp }), {
+    expirationTtl: RECOVER_TTL_SECONDS,
+  });
+
+  const origin = new URL(c.req.url).origin;
+  const link = `${origin}/recuperar?token=${encodeURIComponent(token)}`;
+  const local = isLocalHost(c.req.url);
+  if (!local) {
+    const sent = await sendRecoveryEmail(c.env, link);
+    if (!sent) {
+      return c.json({ error: "No se pudo enviar el correo. Intenta de nuevo en unos minutos." }, 503);
+    }
+  }
+
+  const body: { ok: true; message: string; token?: string } = {
+    ok: true,
+    message: "Si el correo está bien, te llega un enlace a Gmail. Revisa también spam. Caduca en 20 minutos.",
+  };
+  if (local) body.token = token;
+  return c.json(body);
+});
+
+app.post("/api/recover/reset", async (c) => {
+  const secret = c.env.SESSION_SECRET;
+  if (!secret) return c.json({ error: "Servicio no disponible." }, 500);
+
+  const ip = clientIp(c.req.raw);
+  if (!(await recoverResetAllowed(c.env.PLAN_KV, ip))) {
+    return c.json({ error: "Demasiados intentos. Espera unos minutos." }, 429);
+  }
+
+  const body = (await readJson(c.req.raw, MAX_JSON_BYTES.login)) as {
+    token?: unknown;
+    next?: unknown;
+  } | null;
+  const token = typeof body?.token === "string" ? body.token.slice(0, 128) : "";
+  const next = typeof body?.next === "string" ? body.next.slice(0, MAX_PASSWORD) : "";
+  if (!token) {
+    return c.json({ error: "El enlace no es válido o ya caducó." }, 400);
+  }
+  if (next.length < MIN_PASSWORD) {
+    return c.json({ error: `La nueva contraseña debe tener al menos ${MIN_PASSWORD} caracteres.` }, 400);
+  }
+
+  const stored = (await c.env.PLAN_KV.get(RECOVER_KEY, "json")) as { hash?: unknown; exp?: unknown } | null;
+  const hash = typeof stored?.hash === "string" ? stored.hash : "";
+  const exp = typeof stored?.exp === "number" ? stored.exp : 0;
+  const given = await tokenDigest(secret, token);
+  if (!hash || exp < Math.floor(Date.now() / 1000) || !tokenDigestsMatch(given, hash)) {
+    return c.json({ error: "El enlace no es válido o ya caducó." }, 400);
+  }
+  if (await passwordAccepted(c.env, next)) {
+    return c.json({ error: "La nueva contraseña debe ser distinta." }, 400);
+  }
+
+  await c.env.PLAN_KV.put(PASSWORD_KEY, await hashPassword(next));
+  await c.env.PLAN_KV.delete(RECOVER_KEY);
+  const generation = (await sessionGeneration(c.env)) + 1;
+  await c.env.PLAN_KV.put(GEN_KEY, String(generation));
+  c.header("Set-Cookie", await createSessionCookie(secret, c.req.url, generation));
   return c.json({ ok: true });
 });
 

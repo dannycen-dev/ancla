@@ -64,6 +64,14 @@ test.describe("iPhone Safari", () => {
     await expect(page.getByText(/Contraseña incorrecta|No se pudo/i)).toBeVisible();
   });
 
+  test("login ofrece recuperar contraseña", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "Olvidé mi contraseña" })).toBeVisible();
+    await page.goto("/recuperar?token=token-de-prueba");
+    await expect(page.getByLabel(/^Nueva contraseña$/i)).toBeVisible();
+    await expect(page.getByLabel(/Confirmar nueva/i)).toBeVisible();
+  });
+
   test("cambiar de día no pega las marcas del día anterior", async ({ page }) => {
     await loginPage(page);
     await resetTodayLog(page);

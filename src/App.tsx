@@ -11,6 +11,14 @@ import { readCachedPlan, subscribePending } from "./offline.ts";
 
 type Screen = "boot" | "login" | "hub" | "food" | "food-edit" | "gym" | "gym-edit";
 
+function recoverTokenFromUrl(): string {
+  try {
+    return new URL(window.location.href).searchParams.get("token")?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("boot");
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -19,6 +27,7 @@ export default function App() {
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [recoverToken, setRecoverToken] = useState(recoverTokenFromUrl);
 
   useEffect(() => {
     return subscribePending((count) => {
@@ -57,6 +66,10 @@ export default function App() {
   async function hydrate() {
     setError("");
     try {
+      if (recoverTokenFromUrl()) {
+        setScreen("login");
+        return;
+      }
       if (isLoggedOutLocally()) {
         const status = await probeSession();
         if (status === "ok") {
@@ -160,7 +173,16 @@ export default function App() {
   }
 
   if (screen === "login" || !plan) {
-    return <Login onLoggedIn={() => void hydrate()} />;
+    return (
+      <Login
+        recoverToken={recoverToken}
+        onLoggedIn={() => {
+          setRecoverToken("");
+          window.history.replaceState(null, "", "/");
+          void hydrate();
+        }}
+      />
+    );
   }
 
   if (screen === "food-edit" && draft) {

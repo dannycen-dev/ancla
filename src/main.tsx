@@ -10,8 +10,13 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
-if (new URLSearchParams(window.location.search).has("fresh")) {
-  window.history.replaceState(null, "", window.location.pathname);
+{
+  const url = new URL(window.location.href);
+  if (url.searchParams.has("fresh")) {
+    url.searchParams.delete("fresh");
+    const search = url.searchParams.toString();
+    window.history.replaceState(null, "", `${url.pathname}${search ? `?${search}` : ""}${url.hash}`);
+  }
 }
 
 function kickSync() {

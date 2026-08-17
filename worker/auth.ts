@@ -93,6 +93,18 @@ const REFRESH_WITHIN_SECONDS = 60 * 60 * 24 * 2;
 
 export type ParsedSession = { exp: number; generation: number };
 
+export function randomToken(): string {
+  return bytesToB64Url(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+export async function tokenDigest(secret: string, token: string): Promise<string> {
+  return bytesToB64Url(await hmac(secret, token));
+}
+
+export function tokenDigestsMatch(left: string, right: string): boolean {
+  return timingSafeEqual(new TextEncoder().encode(left), new TextEncoder().encode(right));
+}
+
 export async function createSessionCookie(
   secret: string,
   requestUrl: string,

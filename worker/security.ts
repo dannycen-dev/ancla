@@ -136,6 +136,25 @@ export async function writeAllowed(kv: KVNamespace, ip: string): Promise<boolean
   return takeRateSlot(kv, rateKey(ip, "write"), 180, 60);
 }
 
+export async function recoverAllowed(kv: KVNamespace, ip: string): Promise<boolean> {
+  const ipOk = await takeRateSlot(kv, rateKey(ip, "recover"), 3, LOGIN_WINDOW_SECONDS);
+  if (!ipOk) return false;
+  return takeRateSlot(kv, "rl:recover:all", 3, LOGIN_WINDOW_SECONDS);
+}
+
+export async function recoverResetAllowed(kv: KVNamespace, ip: string): Promise<boolean> {
+  return takeRateSlot(kv, rateKey(ip, "recover-reset"), LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS);
+}
+
+export function isLocalHost(requestUrl: string): boolean {
+  try {
+    const host = new URL(requestUrl).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
 async function takeRateSlot(
   kv: KVNamespace,
   key: string,

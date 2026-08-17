@@ -211,4 +211,35 @@ test.describe("API", () => {
     });
     expect(response.status()).toBe(400);
   });
+
+  test("origin cruzado en recuperar se rechaza", async ({ request }) => {
+    const response = await request.post("/api/recover", {
+      headers: { Origin: "https://evil.example" },
+      data: {},
+    });
+    expect(response.status()).toBe(403);
+  });
+
+  test("token de recuperar inválido se rechaza", async ({ request }) => {
+    const response = await request.post("/api/recover/reset", {
+      data: { token: "token-falso", next: "clave-nueva-ancla" },
+    });
+    expect(response.status()).toBe(400);
+  });
+
+  test("recuperar en local da token y no cambia la clave actual", async ({ request }) => {
+    const recover = await request.post("/api/recover", { data: {} });
+    expect(recover.ok()).toBeTruthy();
+    const body = (await recover.json()) as { token?: string };
+    expect(body.token).toBeTruthy();
+
+    const same = await request.post("/api/recover/reset", {
+      data: { token: body.token, next: requirePassword() },
+    });
+    expect(same.status()).toBe(400);
+    const sameBody = (await same.json()) as { error?: string };
+    expect(sameBody.error).toMatch(/al menos 8|distinta/i);
+
+    await loginApi(request);
+  });
 });

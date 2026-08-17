@@ -28,5 +28,14 @@
 	"ai": {
 		"binding": "AI",
 		"remote": true
+	},
+	"send_email": [
+		{
+			"name": "EMAIL",
+			"destination_address": "dannycen.dev@gmail.com"
+		}
+	],
+	"vars": {
+		"RECOVERY_EMAIL": "dannycen.dev@gmail.com"
 	}
 }

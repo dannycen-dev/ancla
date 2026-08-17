@@ -1,2 +1,4 @@
 APP_PASSWORD=cambia-esta-contraseña
 SESSION_SECRET=genera-un-secreto-largo
+# RESEND_API_KEY=
+# MAIL_FROM=ancla@tu-dominio.com
