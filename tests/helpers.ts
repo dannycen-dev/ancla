@@ -1,4 +1,6 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { emptyLog } from "../shared/log.ts";
+import { localDateISO } from "../shared/schedule.ts";
 import { APP_PASSWORD } from "../playwright.config.ts";
 
 export function requirePassword(): string {
@@ -22,5 +24,11 @@ export async function loginApi(request: APIRequestContext): Promise<void> {
   const response = await request.post("/api/login", {
     data: { password: requirePassword() },
   });
+  expect(response.ok()).toBeTruthy();
+}
+
+export async function resetTodayLog(page: Page): Promise<void> {
+  const date = localDateISO(new Date());
+  const response = await page.request.put(`/api/day/${date}`, { data: emptyLog(date) });
   expect(response.ok()).toBeTruthy();
 }

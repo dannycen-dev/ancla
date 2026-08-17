@@ -36,6 +36,8 @@ export default defineConfig({
     {
       name: "iphone-safari",
       testMatch: /mobile.*\.spec\.ts/,
+      fullyParallel: false,
+      workers: 1,
       use: { ...devices["iPhone 14"] },
     },
     {

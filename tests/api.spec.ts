@@ -2,6 +2,10 @@ import { expect, test } from "@playwright/test";
 import { emptyLog } from "../shared/log.ts";
 import { loginApi, requirePassword } from "./helpers.ts";
 
+/** Fecha fija que no es "hoy", para no pisar las marcas de los tests de iPhone. */
+const API_DAY = "2026-03-04";
+const API_PANTRY = "2026-03-01_2026-03-15";
+
 test.describe("API", () => {
   test("sin sesión responde 401", async ({ request }) => {
     const response = await request.get("/api/me");
@@ -31,8 +35,8 @@ test.describe("API", () => {
   });
 
   test("PUT día sin sesión responde 401", async ({ request }) => {
-    const response = await request.put("/api/day/2026-08-16", {
-      data: emptyLog("2026-08-16"),
+    const response = await request.put(`/api/day/${API_DAY}`, {
+      data: emptyLog(API_DAY),
     });
     expect(response.status()).toBe(401);
   });
@@ -61,7 +65,7 @@ test.describe("API", () => {
 
   test("JSON enorme de día no se guarda", async ({ request }) => {
     await loginApi(request);
-    const huge = await request.put("/api/day/2026-08-16", {
+    const huge = await request.put(`/api/day/${API_DAY}`, {
       data: "x".repeat(32_769),
       headers: { "Content-Type": "application/json" },
     });
@@ -79,7 +83,7 @@ test.describe("API", () => {
 
   test("JSON enorme de despensa no se guarda", async ({ request }) => {
     await loginApi(request);
-    const huge = await request.put("/api/pantry/2026-08-16_2026-08-31", {
+    const huge = await request.put(`/api/pantry/${API_PANTRY}`, {
       data: "x".repeat(16_385),
       headers: { "Content-Type": "application/json" },
     });
@@ -113,7 +117,7 @@ test.describe("API", () => {
 
   test("día inválido no se guarda", async ({ request }) => {
     await loginApi(request);
-    const response = await request.put("/api/day/2026-08-16", {
+    const response = await request.put(`/api/day/${API_DAY}`, {
       data: { nope: true },
     });
     expect(response.status()).toBe(400);
@@ -121,8 +125,8 @@ test.describe("API", () => {
 
   test("guardar día válido", async ({ request }) => {
     await loginApi(request);
-    const log = { ...emptyLog("2026-08-16"), waterHalves: 2 };
-    const response = await request.put("/api/day/2026-08-16", { data: log });
+    const log = { ...emptyLog(API_DAY), waterHalves: 2 };
+    const response = await request.put(`/api/day/${API_DAY}`, { data: log });
     expect(response.ok()).toBeTruthy();
     const body = (await response.json()) as { log: { waterHalves: number } };
     expect(body.log.waterHalves).toBe(2);
@@ -144,7 +148,7 @@ test.describe("API", () => {
         byExercise: {},
         history: [
           {
-            date: "2026-08-16",
+            date: API_DAY,
             exerciseId: "squat",
             week: 1,
             note: "",
@@ -155,7 +159,7 @@ test.describe("API", () => {
           {
             id: "rm-1",
             name: "Sentadilla",
-            date: "2026-08-16",
+            date: API_DAY,
             week: 1,
             weight: "100",
             reps: 5,
@@ -174,6 +178,15 @@ test.describe("API", () => {
     const body = (await wipe.json()) as { history: unknown[]; rms: unknown[] };
     expect(body.history.length).toBeGreaterThan(0);
     expect(body.rms.length).toBeGreaterThan(0);
+  });
+
+  test("cambiar contraseña con origen cruzado se rechaza", async ({ request }) => {
+    await loginApi(request);
+    const response = await request.post("/api/password", {
+      headers: { Origin: "https://evil.example" },
+      data: { next: "otra-clave-ancla" },
+    });
+    expect(response.status()).toBe(403);
   });
 
   test("cambiar contraseña exige sesión", async ({ request }) => {

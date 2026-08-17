@@ -44,8 +44,12 @@ app.use("/api/*", requireSameOrigin);
 
 async function readPlan(env: Env): Promise<Plan> {
   const stored = await env.PLAN_KV.get(PLAN_KEY, "json");
-  if (!isPlan(stored)) {
+  if (stored == null) {
     await env.PLAN_KV.put(PLAN_KEY, JSON.stringify(seedPlan));
+    return seedPlan;
+  }
+  if (!isPlan(stored)) {
+    console.error(JSON.stringify({ message: "plan in KV is not valid; serving seed without overwrite" }));
     return seedPlan;
   }
   return normalizePlan(stored);

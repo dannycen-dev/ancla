@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { loginPage } from "./helpers.ts";
+import { loginPage, resetTodayLog } from "./helpers.ts";
 
 test.describe("iPhone Safari", () => {
   test("login, hub, gym y RM caben y responden al tap", async ({ page }) => {
@@ -66,6 +66,7 @@ test.describe("iPhone Safari", () => {
 
   test("cambiar de día no pega las marcas del día anterior", async ({ page }) => {
     await loginPage(page);
+    await resetTodayLog(page);
     await page.getByRole("button", { name: /Plan alimenticio/i }).click();
     await expect(page.locator("main.page")).not.toHaveAttribute("aria-busy", "true");
     const slot = page.getByRole("heading", { name: "Probióticos" }).locator("xpath=ancestor::section[1]");

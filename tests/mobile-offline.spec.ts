@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { loginPage } from "./helpers.ts";
+import { loginPage, resetTodayLog } from "./helpers.ts";
 
 function todayIso(): string {
   const now = new Date();
@@ -24,8 +24,10 @@ test.describe("iPhone Safari offline", () => {
 
   test("marcar comida sin red se sube al reconectar", async ({ page, context }) => {
     await loginPage(page);
+    await resetTodayLog(page);
     await page.getByRole("button", { name: /Plan alimenticio/i }).click();
     await expect(page.getByRole("button", { name: "Hoy", exact: true })).toBeVisible();
+    await expect(page.locator("main.page")).not.toHaveAttribute("aria-busy", "true");
 
     await context.setOffline(true);
     const mark = page.getByRole("button", { name: "Marcar", exact: true }).first();

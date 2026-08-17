@@ -200,6 +200,10 @@ label {
   max-width: 100%;
 }
 
+.gym-time-field > label {
+  margin-top: 0;
+}
+
 .gym-time-field {
   overflow: hidden;
 }
@@ -399,6 +403,12 @@ h1 {
 .check.is-on {
   background: var(--green);
   color: #fffaf2;
+}
+
+.page[aria-busy="true"] button.check,
+.page[aria-busy="true"] button.check-line {
+  pointer-events: none;
+  opacity: 0.55;
 }
 
 .habit {

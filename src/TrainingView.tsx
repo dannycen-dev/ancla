@@ -596,15 +596,17 @@ function GymTimeField({
   }, [saved]);
 
   return (
-    <label className="gym-time-field">
-      {label}
-      <input
-        type="time"
-        step="60"
-        autoComplete="off"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-      />
+    <div className="gym-time-field">
+      <label>
+        {label}
+        <input
+          type="time"
+          step="60"
+          autoComplete="off"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </label>
       {dirty ? (
         <div className="gym-time-actions">
           <button type="button" className="ghost" onClick={() => setDraft(savedClock)}>
@@ -612,6 +614,7 @@ function GymTimeField({
           </button>
           <button
             type="button"
+            disabled={!draft}
             onClick={() => {
               if (!draft) return;
               onCommit(draft);
@@ -621,7 +624,7 @@ function GymTimeField({
           </button>
         </div>
       ) : null}
-    </label>
+    </div>
   );
 }
 

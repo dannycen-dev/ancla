@@ -292,6 +292,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
               jsDay={jsDay}
               current={slot.id === currentId}
               done={view.doneSlotIds.includes(slot.id)}
+              ready={dayReady}
               onToggle={() => toggleSlot(slot.id)}
             />
           </li>
@@ -329,6 +330,7 @@ export function PlanView({ plan, fromCache, pending, onHome, onEdit, onLogout, o
         <button
           type="button"
           className={`check-line ${log.waterHalves >= WATER_GOAL_HALVES ? "is-on" : ""}`}
+          disabled={!dayReady}
           onClick={() =>
             patchLog({
               ...log,
@@ -511,6 +513,7 @@ function SlotCard({
   jsDay,
   current,
   done,
+  ready,
   onToggle,
 }: {
   slot: ScheduleSlot;
@@ -518,6 +521,7 @@ function SlotCard({
   jsDay: number;
   current: boolean;
   done: boolean;
+  ready: boolean;
   onToggle: () => void;
 }) {
   const meal = slot.mealId ? plan.meals.find((item) => item.id === slot.mealId) : undefined;
@@ -532,7 +536,7 @@ function SlotCard({
       >
         <div className="meal-head">
           <time dateTime={slot.time}>{formatTime12(slot.time)}</time>
-          <CheckButton done={done} onToggle={onToggle} />
+          <CheckButton done={done} disabled={!ready} onToggle={onToggle} />
         </div>
         <h2>{slot.title}</h2>
         {slot.detail ? <p>{slot.detail}</p> : null}
@@ -548,6 +552,7 @@ function SlotCard({
       jsDay={jsDay}
       current={current}
       done={done}
+      ready={ready}
       onToggle={onToggle}
     />
   );
@@ -559,6 +564,7 @@ function MealCard({
   jsDay,
   current,
   done,
+  ready,
   onToggle,
 }: {
   meal: Meal;
@@ -566,6 +572,7 @@ function MealCard({
   jsDay: number;
   current: boolean;
   done: boolean;
+  ready: boolean;
   onToggle: () => void;
 }) {
   const option = meal.options[variationIndex(jsDay, meal.options.length)];
@@ -583,7 +590,7 @@ function MealCard({
     >
       <div className="meal-head">
         <time dateTime={slot.time}>{formatTime12(slot.time)}</time>
-        <CheckButton done={done} onToggle={onToggle} />
+          <CheckButton done={done} disabled={!ready} onToggle={onToggle} />
       </div>
       <h2>{meal.name}</h2>
       <h3>{option.title}</h3>
@@ -607,12 +614,13 @@ function MealCard({
   );
 }
 
-function CheckButton({ done, onToggle }: { done: boolean; onToggle: () => void }) {
+function CheckButton({ done, onToggle, disabled }: { done: boolean; onToggle: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       className={`check ${done ? "is-on" : ""}`}
       aria-pressed={done}
+      disabled={disabled}
       onClick={onToggle}
     >
       {done ? "Hecho" : "Marcar"}
